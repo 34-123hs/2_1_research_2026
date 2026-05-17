@@ -1,0 +1,45 @@
+# Local dev / smoke tests
+_smoke_test.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Claude Code workspace
+.claude/
+
+# wandb
+wandb/
+
+# Training artifacts
+custom-llm-out/
+sweep_outputs/
+
+# Model checkpoints
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Datasets (preprocessed token shards)
+train.bin
+val.bin
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*.env
