@@ -35,17 +35,16 @@ class StabilityProbe:
         self.gate_selections = defaultdict(list)  # {layer_idx: [tensor[B*N]   per step]}
         self.raw_certainty   = defaultdict(list)  # {layer_idx: [tensor[B*N,1] per step]}
 
-        # gradient checkpoint가 켜져 있으면 backward 시 forward가 한 번 더 돌면서
-        # hook이 두 번 fire함 → 진단 정확도 위해 한시적으로 끈다 (모델 메모리 약간 증가).
-        for layer in model.transformer.layers:
-            layer[1].use_checkpoint = False
-
+        # gradient checkpoint는 켠 채로 둔다(메모리). 단 backward 시 recompute로 MoE hook이
+        # 한 번 더 fire하므로, 호출당 max_steps 만큼만 기록하고 나머지는 무시 → 데이터 중복 방지.
         self._register()
 
     def _register(self):
         for i, layer in enumerate(self.model.transformer.layers):
             _atten, amoe = layer
+            cap = amoe.max_steps   # 첫 max_steps번만 기록, 그 이후(backward recompute)는 무시
 
+            # AMoE는 layer당 1회만 호출되므로 dedupe 불필요
             def make_amoe_hook(idx):
                 def hook(module, inputs, output):
                     sum_logit, hp = output
@@ -54,19 +53,23 @@ class StabilityProbe:
                 return hook
             self.handles.append(amoe.register_forward_hook(make_amoe_hook(i)))
 
-            def make_gate_hook(idx):
+            def make_gate_hook(idx, cap):
                 def hook(module, inputs, output):
+                    if len(self.gate_selections[idx]) >= cap:
+                        return
                     selected = output.argmax(dim=-1).detach()
                     self.gate_selections[idx].append(selected)
                 return hook
-            self.handles.append(amoe.moe.gate.register_forward_hook(make_gate_hook(i)))
+            self.handles.append(amoe.moe.gate.register_forward_hook(make_gate_hook(i, cap)))
 
-            def make_moe_hook(idx):
+            def make_moe_hook(idx, cap):
                 def hook(module, inputs, output):
+                    if len(self.raw_certainty[idx]) >= cap:
+                        return
                     _, certainty = output
                     self.raw_certainty[idx].append(certainty.detach())
                 return hook
-            self.handles.append(amoe.moe.register_forward_hook(make_moe_hook(i)))
+            self.handles.append(amoe.moe.register_forward_hook(make_moe_hook(i, cap)))
 
     def run_step(self, input_ids):
         self.model.zero_grad(set_to_none=True)
