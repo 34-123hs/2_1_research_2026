@@ -13,10 +13,12 @@ Part 2: analyze()     — 수집한 정보를 8가지 섹션으로 출력
 """
 import argparse
 import math
+import os
 from collections import defaultdict
 
 import numpy as np
 import torch
+from safetensors.torch import load_file
 
 from custom_model_train import LLM, MemmapDataset, TiktokenHFWrapper
 
@@ -255,6 +257,8 @@ def parse_args():
     p.add_argument("--seed", type=int, default=576)
     p.add_argument("--dump_tokens", type=int, default=32)
     p.add_argument("--no_dump", action="store_true")
+    p.add_argument("--checkpoint_dir", default=None,
+                   help="HF Trainer 저장 폴더. None이면 random init.")
     return p.parse_args()
 
 
@@ -275,6 +279,28 @@ def main():
         experts=args.experts, base=args.rope_base, dropout=args.dropout,
         ponder_beta=args.ponder_beta, lambda_p=args.lambda_p,
     ).to(device)
+
+    if args.checkpoint_dir:
+        st_path = os.path.join(args.checkpoint_dir, "model.safetensors")
+        pt_path = os.path.join(args.checkpoint_dir, "pytorch_model.bin")
+        if os.path.exists(st_path):
+            state = load_file(st_path, device=device)
+            src = st_path
+        elif os.path.exists(pt_path):
+            state = torch.load(pt_path, map_location=device, weights_only=True)
+            src = pt_path
+        else:
+            raise FileNotFoundError(
+                f"no model.safetensors / pytorch_model.bin in {args.checkpoint_dir}")
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        print(f"[ckpt] loaded {src}")
+        if missing:
+            print(f"[ckpt] missing keys ({len(missing)}): {missing[:5]}"
+                  + (" ..." if len(missing) > 5 else ""))
+        if unexpected:
+            print(f"[ckpt] unexpected keys ({len(unexpected)}): {unexpected[:5]}"
+                  + (" ..." if len(unexpected) > 5 else ""))
+
     model.train()
 
     n_params = sum(p.numel() for p in model.parameters())
