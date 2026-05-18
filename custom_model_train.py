@@ -65,7 +65,15 @@ class MoE(nn.Module):
             out = expert(tokens)                                # [matched, D]
             results[s_idx] = weights[s_idx, None] * out
 
-        return results, certainty
+        # Switch Transformer load-balance aux loss
+        # f_i = mean over tokens of 1[selected==i]   (non-differentiable)
+        # P_i = mean over tokens of gate_probs[:, i] (differentiable; routes grad to gate)
+        E = gate_probs.size(-1)
+        f = F.one_hot(selected, num_classes=E).to(gate_probs.dtype).mean(dim=0)  # [E]
+        P = gate_probs.mean(dim=0)                                               # [E]
+        balance_aux = E * (f * P).sum()                                          # scalar
+
+        return results, certainty, balance_aux
 
 
 class AMoE(nn.Module):
@@ -90,32 +98,32 @@ class AMoE(nn.Module):
         sum_certainty  = torch.zeros_like(state[..., :1])  # [B, N, 1]
         sum_logit      = torch.zeros_like(state)           # [B, N, D]
 
-        halting_probs = []  # 매 스텝의 step_cert를 모음 (정규화용)
+        halting_probs = []
+        balance_sum = x.new_zeros(())
 
         for t in range(self.max_steps):
             flat = state.reshape(B * N, D)
-            new_flat, cert_flat = self._moe_call(flat)
+            new_flat, cert_flat, balance_aux = self._moe_call(flat)
             new_state = new_flat.reshape(B, N, D)
             cert      = cert_flat.reshape(B, N, 1)
+            balance_sum = balance_sum + balance_aux
 
-            # active: 아직 halt 안 된 토큰만 기여
             active = (sum_certainty < 1 - self.eps).to(cert.dtype)  # [B, N, 1]
 
             if t == self.max_steps - 1:
-                # 마지막 스텝: 남은 mass 전부 할당
                 step_cert = (1 - sum_certainty) * active
             else:
                 step_cert = torch.min(1 - sum_certainty, cert) * active
 
             sum_logit     = sum_logit + new_state * step_cert
             sum_certainty = sum_certainty + step_cert
-            # state는 active 토큰만 갱신, halted는 freeze
             state = torch.where(active > 0.5, new_state, state)
 
             halting_probs.append(step_cert.squeeze(-1))  # [B, N]
 
         halting_probs = torch.stack(halting_probs, dim=0)  # [T, B, N]
-        return sum_logit, halting_probs
+        balance_avg = balance_sum / self.max_steps
+        return sum_logit, halting_probs, balance_avg
 
 
 class Attention(nn.Module):
@@ -160,22 +168,26 @@ class Transformer(nn.Module):
 
     def forward(self, x):
         all_halting_probs = []
+        all_balance = []
         for atten, ff in self.layers:
             x = atten(x) + x
-            ff_out, hp = ff(x)      # AMoE: (sum_logit, halting_probs [T,B,N])
+            ff_out, hp, bal = ff(x)
             x = ff_out + x
             all_halting_probs.append(hp)
-        return self.norm(x), all_halting_probs
+            all_balance.append(bal)
+        return self.norm(x), all_halting_probs, all_balance
 
 
 class LLM(nn.Module):
     def __init__(self, dim, depth, max_len, mlp_dim, heads, dim_head,
                  vocab_size, padding_idx, experts,
-                 base=10000, dropout=0., ponder_beta=0.01, lambda_p=0.2):
+                 base=10000, dropout=0., ponder_beta=0.01, lambda_p=0.2,
+                 balance_beta=0.01):
         super().__init__()
         self.padding_idx = padding_idx
         self.ponder_beta = ponder_beta
         self.lambda_p = lambda_p
+        self.balance_beta = balance_beta
         self.embedding = nn.Embedding(vocab_size, dim, padding_idx=padding_idx)
         self.transformer = Transformer(dim, depth, max_len, mlp_dim, heads,
                                        dim_head, experts, base, dropout=dropout)
@@ -199,7 +211,7 @@ class LLM(nn.Module):
     def forward(self, input_ids, labels=None, attention_mask=None, **kwargs):
         x = self.embedding(input_ids)
         x = self.dropout(x)
-        x, all_halting_probs = self.transformer(x)
+        x, all_halting_probs, all_balance = self.transformer(x)
         logits = self.mlp_head(x)
 
         loss = None
@@ -212,7 +224,10 @@ class LLM(nn.Module):
                 ignore_index=-100,
             )
             ponder_loss = self._ponder_loss(all_halting_probs)
-            loss = task_loss + self.ponder_beta * ponder_loss
+            balance_loss = torch.stack(all_balance).mean()
+            loss = (task_loss
+                    + self.ponder_beta * ponder_loss
+                    + self.balance_beta * balance_loss)
         return CausalLMOutput(loss=loss, logits=logits)
 
 
