@@ -220,8 +220,12 @@ def compute_aux_and_metrics(collector: HookCollector,
 
 _MATPLOTLIB_INITED = False
 
-def _log_heatmap_image(step: int, cert_matrix):
-    """cert_matrix shape [depth, T] → matplotlib heatmap → wandb.Image."""
+def _log_heatmap_image(step: int, cert_matrix, grad_norms=None):
+    """
+    Left: cert_matrix [depth, T] heatmap.
+    Right (optional): per-layer grad_norm horizontal bar.
+    → 1 combined wandb.Image.
+    """
     global _MATPLOTLIB_INITED
     if not _MATPLOTLIB_INITED:
         import matplotlib
@@ -230,7 +234,17 @@ def _log_heatmap_image(step: int, cert_matrix):
     import matplotlib.pyplot as plt
 
     D, T = cert_matrix.shape
-    fig, ax = plt.subplots(figsize=(max(4, T * 0.5), max(3, D * 0.25)))
+    has_gn = grad_norms is not None and len(grad_norms) > 0
+
+    if has_gn:
+        fig, (ax, ax2) = plt.subplots(
+            1, 2, figsize=(max(6, T * 0.5 + 3), max(3, D * 0.25)),
+            gridspec_kw={"width_ratios": [T, 4]},
+        )
+    else:
+        fig, ax = plt.subplots(figsize=(max(4, T * 0.5), max(3, D * 0.25)))
+        ax2 = None
+
     im = ax.imshow(cert_matrix, aspect="auto", cmap="viridis", vmin=0, vmax=1)
     ax.set_xlabel("AMoE step (수직 반복)")
     ax.set_ylabel("Layer (depth)")
@@ -238,6 +252,17 @@ def _log_heatmap_image(step: int, cert_matrix):
     ax.set_yticks(range(D))
     ax.set_title(f"Certainty heatmap @ step {step}")
     fig.colorbar(im, ax=ax, label="mean step_cert")
+
+    if ax2 is not None:
+        ys = list(range(D))
+        ax2.barh(ys, grad_norms[:D], color="tab:orange")
+        ax2.set_yticks(ys)
+        ax2.invert_yaxis()
+        ax2.set_xlabel("grad_norm (L2)")
+        ax2.set_title("per-layer grad_norm")
+        ax2.set_xscale("log")
+        ax2.grid(True, axis="x", alpha=0.3)
+
     fig.tight_layout()
     wandb.log({"halting/cert_heatmap": wandb.Image(fig)}, step=step)
     plt.close(fig)
@@ -258,11 +283,12 @@ def _bar_char(v: float) -> str:
 def print_console_report(step: int,
                          cert_matrix,           # np.ndarray [depth, T] or None
                          per_layer_table: dict, # {"balance":[..],"max_pct":[..],"ent_norm":[..],"mean_step":[..]}
+                         grad_norms,            # list[float] len=depth or None
                          globals_: dict):
     """
     한 번에 보여주는 콘솔 리포트:
       [1] 글로벌 요약 한 줄
-      [2] depth × {balance, max%, ent, h_step} 표
+      [2] depth × {grad_norm, balance, max%, ent, h_step} 표
       [3] depth × AMoE_step certainty heatmap (값 + ASCII 농도)
     """
     print(f"\n========== [Console step={step}] ==========", flush=True)
@@ -278,17 +304,21 @@ def print_console_report(step: int,
     mx = per_layer_table.get("max_pct", [])
     en = per_layer_table.get("ent_norm", [])
     ms = per_layer_table.get("mean_step", [])
-    depth = max(len(bal), len(mx), len(en), len(ms))
+    gn = grad_norms or []
+    depth = max(len(bal), len(mx), len(en), len(ms), len(gn))
 
     if depth > 0:
         print("\n  per-layer:", flush=True)
-        print(f"  {'L':>3}  {'bal':>6}  {'max%':>6}  {'ent':>6}  {'h_step':>7}", flush=True)
+        print(f"  {'L':>3}  {'grad_norm':>10}  {'bal':>6}  "
+              f"{'max%':>6}  {'ent':>6}  {'h_step':>7}", flush=True)
         for li in range(depth):
             b = bal[li] if li < len(bal) else float('nan')
             m = mx[li] if li < len(mx) else float('nan')
             e = en[li] if li < len(en) else float('nan')
             s = ms[li] if li < len(ms) else float('nan')
-            print(f"  {li:>3}  {b:>6.3f}  {m:>6.3f}  {e:>6.3f}  {s:>7.3f}", flush=True)
+            g = gn[li] if li < len(gn) else float('nan')
+            print(f"  {li:>3}  {g:>10.4e}  {b:>6.3f}  "
+                  f"{m:>6.3f}  {e:>6.3f}  {s:>7.3f}", flush=True)
 
     if cert_matrix is not None:
         D, T = cert_matrix.shape
@@ -323,6 +353,29 @@ class HookedTrainer(Trainer):
         self._last_aux_metrics = {}
         self._last_cert_matrix = None
         self._last_per_layer = {}
+        self._last_grad_norms = None  # list[float], len=depth
+
+    def _compute_layer_grad_norms(self):
+        """각 (Attention + AMoE) layer의 grad L2 norm. backward 이후, optimizer.step 전에 호출."""
+        out = []
+        for atten, amoe in self.model.transformer.layers:
+            sq = 0.0
+            for p in atten.parameters():
+                if p.grad is not None:
+                    sq += float(p.grad.detach().float().pow(2).sum())
+            for p in amoe.parameters():
+                if p.grad is not None:
+                    sq += float(p.grad.detach().float().pow(2).sum())
+            out.append(math.sqrt(sq))
+        return out
+
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        loss = super().training_step(model, inputs,
+                                     num_items_in_batch=num_items_in_batch)
+        # accumulation cycle의 마지막 micro-batch에서만 캡쳐 (optimizer.step 직전)
+        if self.accelerator.sync_gradients:
+            self._last_grad_norms = self._compute_layer_grad_norms()
+        return loss
 
     def compute_loss(self, model, inputs, return_outputs=False,
                      num_items_in_batch=None):
@@ -363,9 +416,16 @@ class HookedTrainer(Trainer):
             tot   = self._last_aux_metrics.get("aux/total_loss", float("nan"))
 
             # 한 줄 요약 (항상)
+            gn = self._last_grad_norms
+            gn_total = math.sqrt(sum(g * g for g in gn)) if gn else float("nan")
             print(f"[Aux step={step}] balance={b_l:.4f}  router_max={r_max:.3f}  "
-                  f"router_ent_norm={r_ent:.3f}  halt_mean_step={h_ms:.2f}",
+                  f"router_ent_norm={r_ent:.3f}  halt_mean_step={h_ms:.2f}  "
+                  f"grad_norm={gn_total:.3e}",
                   flush=True)
+
+            # wandb 글로벌 grad_norm
+            if gn and wandb.run is not None:
+                logs["grad_norm/global_l2"] = gn_total
 
             # 상세 콘솔 리포트 (--print_console 일 때만)
             if self._print_console:
@@ -373,16 +433,17 @@ class HookedTrainer(Trainer):
                     step=step,
                     cert_matrix=self._last_cert_matrix,
                     per_layer_table=self._last_per_layer,
+                    grad_norms=gn,
                     globals_={
                         "balance": b_l, "router_max": r_max, "ent_norm": r_ent,
                         "halt_step": h_ms, "base_loss": base, "total_loss": tot,
                     },
                 )
 
-            # wandb 1-키 heatmap (depth × AMoE_step certainty as image)
+            # wandb 1-키 image: heatmap + grad_norm bar
             if self._last_cert_matrix is not None and wandb.run is not None:
                 try:
-                    _log_heatmap_image(step, self._last_cert_matrix)
+                    _log_heatmap_image(step, self._last_cert_matrix, gn)
                 except Exception as e:
                     print(f"[wandb heatmap skip] {e}", flush=True)
         return super().log(logs, *args, **kwargs)
