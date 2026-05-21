@@ -123,22 +123,19 @@ def compute_aux_and_metrics(collector: HookCollector,
     if n_gate == 0:
         balance_loss = torch.zeros((), device="cuda" if torch.cuda.is_available() else "cpu")
         metrics["debug/gate_capture_count"] = 0
-        return balance_loss, metrics
+        return balance_loss, metrics, None, {"balance": [], "max_pct": [], "ent_norm": [], "mean_step": []}
 
     # E from first
     E = gate_logits_list[0].size(-1)
     metrics["debug/gate_capture_count"] = n_gate
     metrics["debug/expected_gate_count"] = depth * max_steps
 
-    # per-(layer,step) balance, router stats
-    per_layer_bal = []          # E[f·P] sum * E per layer (avg over steps)
+    # Walk layers — hook 순서: layer0의 step0..N, layer1의 step0..N, ...
+    step_count_per_layer = n_gate // depth if n_gate % depth == 0 else 0
+
+    per_layer_bal = []
     per_layer_max_pct = []
     per_layer_entropy_norm = []
-
-    # Walk layers
-    # Order: stability_check 분석에 의하면 hook 순서는 layer0의 step0..N, layer1의 step0..N, ...
-    # 정확히는 forward 중 layer.depth 만큼 AMoE가 순서대로 fire되고 그 안에서 step마다 gate.fire.
-    step_count_per_layer = n_gate // depth if n_gate % depth == 0 else 0
 
     if step_count_per_layer == 0:
         # 비균등 — fallback: 전체를 단순 평균
@@ -192,19 +189,89 @@ def compute_aux_and_metrics(collector: HookCollector,
 
     # ---- halting stats ----
     hp_list = collector.halting_probs_per_layer  # [T, B, N] each
+    cert_matrix = None  # [depth, T] mean step_cert per (layer, step)
     if len(hp_list) > 0:
-        # expected step count per token = sum_t (step_cert[t] * (t+1))
+        T = hp_list[0].size(0)
+        cert_matrix = np.zeros((len(hp_list), T), dtype=np.float32)
         per_layer_mean_step = []
         for li, hp in enumerate(hp_list):
-            T = hp.size(0)
             t_idx = torch.arange(1, T + 1, device=hp.device, dtype=hp.dtype)
             mean_step = (hp * t_idx.view(T, 1, 1)).sum(dim=0).mean()
             per_layer_mean_step.append(float(mean_step.detach()))
+            cert_matrix[li] = hp.mean(dim=(1, 2)).detach().float().cpu().numpy()
             if log_per_layer:
                 metrics[f"halting/mean_step/L{li}"] = per_layer_mean_step[-1]
         metrics["halting/mean_step_global"] = float(np.mean(per_layer_mean_step))
 
-    return balance_loss, metrics
+    # per-layer scalars dict for console table (always built, even if not logged to wandb)
+    per_layer_table = {
+        "balance": [float(b.detach()) for b in per_layer_bal] if per_layer_bal else [],
+        "max_pct": per_layer_max_pct,
+        "ent_norm": per_layer_entropy_norm,
+        "mean_step": per_layer_mean_step if len(hp_list) > 0 else [],
+    }
+
+    return balance_loss, metrics, cert_matrix, per_layer_table
+
+
+# ============================================================
+# Console pretty-printers
+# ============================================================
+
+_BAR_CHARS = " ·░▒▓█"
+
+def _bar_char(v: float) -> str:
+    # v ∈ [0, 1] → block char
+    idx = max(0, min(len(_BAR_CHARS) - 1, int(v * len(_BAR_CHARS))))
+    return _BAR_CHARS[idx]
+
+
+def print_console_report(step: int,
+                         cert_matrix,           # np.ndarray [depth, T] or None
+                         per_layer_table: dict, # {"balance":[..],"max_pct":[..],"ent_norm":[..],"mean_step":[..]}
+                         globals_: dict):
+    """
+    한 번에 보여주는 콘솔 리포트:
+      [1] 글로벌 요약 한 줄
+      [2] depth × {balance, max%, ent, h_step} 표
+      [3] depth × AMoE_step certainty heatmap (값 + ASCII 농도)
+    """
+    print(f"\n========== [Console step={step}] ==========", flush=True)
+    print(f"  balance={globals_.get('balance', float('nan')):.4f}  "
+          f"router_max={globals_.get('router_max', float('nan')):.3f}  "
+          f"ent_norm={globals_.get('ent_norm', float('nan')):.3f}  "
+          f"halt_mean_step={globals_.get('halt_step', float('nan')):.2f}  "
+          f"base_loss={globals_.get('base_loss', float('nan')):.4f}  "
+          f"total={globals_.get('total_loss', float('nan')):.4f}",
+          flush=True)
+
+    bal = per_layer_table.get("balance", [])
+    mx = per_layer_table.get("max_pct", [])
+    en = per_layer_table.get("ent_norm", [])
+    ms = per_layer_table.get("mean_step", [])
+    depth = max(len(bal), len(mx), len(en), len(ms))
+
+    if depth > 0:
+        print("\n  per-layer:", flush=True)
+        print(f"  {'L':>3}  {'bal':>6}  {'max%':>6}  {'ent':>6}  {'h_step':>7}", flush=True)
+        for li in range(depth):
+            b = bal[li] if li < len(bal) else float('nan')
+            m = mx[li] if li < len(mx) else float('nan')
+            e = en[li] if li < len(en) else float('nan')
+            s = ms[li] if li < len(ms) else float('nan')
+            print(f"  {li:>3}  {b:>6.3f}  {m:>6.3f}  {e:>6.3f}  {s:>7.3f}", flush=True)
+
+    if cert_matrix is not None:
+        D, T = cert_matrix.shape
+        print(f"\n  certainty heatmap [depth={D} × AMoE_step={T}]  "
+              f"(mean step_cert per token; rows ~sum to 1):", flush=True)
+        header = "      " + " ".join(f" s{t:<3d}" for t in range(T))
+        print(header, flush=True)
+        for li in range(D):
+            row_vals = " ".join(f"{cert_matrix[li, t]:5.3f}" for t in range(T))
+            row_bars = "".join(_bar_char(cert_matrix[li, t]) for t in range(T))
+            print(f"  L{li:>2}  {row_vals}   {row_bars}", flush=True)
+    print("=" * 44, flush=True)
 
 
 # ============================================================
@@ -214,15 +281,19 @@ def compute_aux_and_metrics(collector: HookCollector,
 class HookedTrainer(Trainer):
     def __init__(self, *args, collector: HookCollector, depth: int,
                  max_steps_amoe: int, balance_beta: float,
-                 log_per_layer: bool, console_log_interval: int = 20, **kwargs):
+                 log_per_layer: bool, print_console: bool,
+                 console_log_interval: int = 20, **kwargs):
         super().__init__(*args, **kwargs)
         self._collector = collector
         self._depth = depth
         self._max_steps_amoe = max_steps_amoe
         self._balance_beta = balance_beta
         self._log_per_layer = log_per_layer
+        self._print_console = print_console
         self._console_interval = console_log_interval
         self._last_aux_metrics = {}
+        self._last_cert_matrix = None
+        self._last_per_layer = {}
 
     def compute_loss(self, model, inputs, return_outputs=False,
                      num_items_in_batch=None):
@@ -230,7 +301,7 @@ class HookedTrainer(Trainer):
         outputs = model(**inputs)
         base_loss = outputs.loss  # = task + ponder_beta * ponder_kl
 
-        bal_loss, metrics = compute_aux_and_metrics(
+        bal_loss, metrics, cert_matrix, per_layer_table = compute_aux_and_metrics(
             self._collector,
             depth=self._depth,
             max_steps=self._max_steps_amoe,
@@ -239,30 +310,45 @@ class HookedTrainer(Trainer):
 
         total = base_loss + self._balance_beta * bal_loss
 
-        # task/ponder 분리 추정용: ponder_loss는 모델 내부 → 외부에서 분리 불가능.
-        # 대안: hooks로 halting_probs 잡고 동일 공식으로 재계산
         metrics["aux/base_loss"] = float(base_loss.detach())
         metrics["aux/total_loss"] = float(total.detach())
 
         self._last_aux_metrics = metrics
+        self._last_cert_matrix = cert_matrix
+        self._last_per_layer = per_layer_table
 
         if return_outputs:
             return total, outputs
         return total
 
     def log(self, logs, *args, **kwargs):
-        # HF Trainer가 logging_steps마다 부르는 훅에 우리 metric 추가
         if self._last_aux_metrics:
             logs.update(self._last_aux_metrics)
-            # 콘솔 요약
+
             step = self.state.global_step
             r_max = self._last_aux_metrics.get("router/max_pct_global", float("nan"))
             r_ent = self._last_aux_metrics.get("router/entropy_norm_global", float("nan"))
             h_ms  = self._last_aux_metrics.get("halting/mean_step_global", float("nan"))
             b_l   = self._last_aux_metrics.get("aux/balance_loss", float("nan"))
+            base  = self._last_aux_metrics.get("aux/base_loss", float("nan"))
+            tot   = self._last_aux_metrics.get("aux/total_loss", float("nan"))
+
+            # 한 줄 요약 (항상)
             print(f"[Aux step={step}] balance={b_l:.4f}  router_max={r_max:.3f}  "
                   f"router_ent_norm={r_ent:.3f}  halt_mean_step={h_ms:.2f}",
                   flush=True)
+
+            # 상세 콘솔 리포트 (--print_console 일 때만)
+            if self._print_console:
+                print_console_report(
+                    step=step,
+                    cert_matrix=self._last_cert_matrix,
+                    per_layer_table=self._last_per_layer,
+                    globals_={
+                        "balance": b_l, "router_max": r_max, "ent_norm": r_ent,
+                        "halt_step": h_ms, "base_loss": base, "total_loss": tot,
+                    },
+                )
         return super().log(logs, *args, **kwargs)
 
 
@@ -317,6 +403,8 @@ def parse_args():
                    help="Switch Transformer load-balance aux weight (hook 기반)")
     p.add_argument("--log_per_layer", action="store_true",
                    help="layer별 router/halting/balance를 wandb에 모두 기록")
+    p.add_argument("--print_console", action="store_true",
+                   help="매 logging_steps마다 콘솔에 per-layer 표 + (depth×AMoE_step) certainty heatmap 출력")
 
     # Muon
     p.add_argument("--muon_lr", type=float, default=0.02)
@@ -393,7 +481,8 @@ def run_training(args):
     sample_amoe = model.transformer.layers[0][1]
     max_steps_amoe = sample_amoe.max_steps
     print(f"[Hooks] attached. depth={args.depth}  max_steps={max_steps_amoe}  "
-          f"balance_beta={args.balance_beta}  log_per_layer={args.log_per_layer}")
+          f"balance_beta={args.balance_beta}  log_per_layer={args.log_per_layer}  "
+          f"print_console={args.print_console}")
 
     train_ds = MemmapDataset(args.train_bin_path, args.block_size)
     eval_ds = MemmapDataset(args.val_bin_path, args.block_size,
@@ -443,6 +532,7 @@ def run_training(args):
         max_steps_amoe=max_steps_amoe,
         balance_beta=args.balance_beta,
         log_per_layer=args.log_per_layer,
+        print_console=args.print_console,
         console_log_interval=targs.logging_steps,
     )
     trainer.train()
