@@ -182,6 +182,11 @@ def run_training(args):
         data_collator=collator,
         optimizers=(optimizer, None),
     )
+    # HF Trainer >=4.46 GA loss bug fix:
+    # LLM.forward has **kwargs → HF infers model_accepts_loss_kwargs=True → loss
+    # is NOT divided by grad_accum_steps for reporting → train/loss is inflated
+    # by grad_accum. Force False to restore correct mean-reduction scaling.
+    trainer.model_accepts_loss_kwargs = False
     trainer.train()
 
     metrics = trainer.evaluate()

@@ -215,6 +215,35 @@ def compute_aux_and_metrics(collector: HookCollector,
 
 
 # ============================================================
+# wandb image logger (depth × AMoE_step certainty heatmap)
+# ============================================================
+
+_MATPLOTLIB_INITED = False
+
+def _log_heatmap_image(step: int, cert_matrix):
+    """cert_matrix shape [depth, T] → matplotlib heatmap → wandb.Image."""
+    global _MATPLOTLIB_INITED
+    if not _MATPLOTLIB_INITED:
+        import matplotlib
+        matplotlib.use("Agg")
+        _MATPLOTLIB_INITED = True
+    import matplotlib.pyplot as plt
+
+    D, T = cert_matrix.shape
+    fig, ax = plt.subplots(figsize=(max(4, T * 0.5), max(3, D * 0.25)))
+    im = ax.imshow(cert_matrix, aspect="auto", cmap="viridis", vmin=0, vmax=1)
+    ax.set_xlabel("AMoE step (수직 반복)")
+    ax.set_ylabel("Layer (depth)")
+    ax.set_xticks(range(T))
+    ax.set_yticks(range(D))
+    ax.set_title(f"Certainty heatmap @ step {step}")
+    fig.colorbar(im, ax=ax, label="mean step_cert")
+    fig.tight_layout()
+    wandb.log({"halting/cert_heatmap": wandb.Image(fig)}, step=step)
+    plt.close(fig)
+
+
+# ============================================================
 # Console pretty-printers
 # ============================================================
 
@@ -349,6 +378,13 @@ class HookedTrainer(Trainer):
                         "halt_step": h_ms, "base_loss": base, "total_loss": tot,
                     },
                 )
+
+            # wandb 1-키 heatmap (depth × AMoE_step certainty as image)
+            if self._last_cert_matrix is not None and wandb.run is not None:
+                try:
+                    _log_heatmap_image(step, self._last_cert_matrix)
+                except Exception as e:
+                    print(f"[wandb heatmap skip] {e}", flush=True)
         return super().log(logs, *args, **kwargs)
 
 
@@ -535,6 +571,8 @@ def run_training(args):
         print_console=args.print_console,
         console_log_interval=targs.logging_steps,
     )
+    # HF Trainer >=4.46 GA loss bug fix (see train_custom.py).
+    trainer.model_accepts_loss_kwargs = False
     trainer.train()
 
     metrics = trainer.evaluate()
