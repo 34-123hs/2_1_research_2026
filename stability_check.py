@@ -47,7 +47,7 @@ class StabilityProbe:
             # AMoE는 layer당 1회만 호출되므로 dedupe 불필요
             def make_amoe_hook(idx):
                 def hook(module, inputs, output):
-                    sum_logit, hp, _bal = output
+                    sum_logit, hp = output
                     self.halting_probs[idx] = hp.detach()
                     self.act_norms[idx] = sum_logit.detach().float().norm(dim=-1).mean().item()
                 return hook
@@ -66,7 +66,7 @@ class StabilityProbe:
                 def hook(module, inputs, output):
                     if len(self.raw_certainty[idx]) >= cap:
                         return
-                    _results, certainty, _bal = output
+                    _, certainty = output
                     self.raw_certainty[idx].append(certainty.detach())
                 return hook
             self.handles.append(amoe.moe.register_forward_hook(make_moe_hook(i, cap)))

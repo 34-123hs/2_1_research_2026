@@ -56,10 +56,9 @@ def parse_args():
     p.add_argument("--dropout", type=float, default=0.0)
 
     # AMoE
-    p.add_argument("--experts",      type=int,   default=4)
-    p.add_argument("--ponder_beta",  type=float, default=0.01)
-    p.add_argument("--lambda_p",     type=float, default=0.2)
-    p.add_argument("--balance_beta", type=float, default=0.01)
+    p.add_argument("--experts",     type=int,   default=4)
+    p.add_argument("--ponder_beta", type=float, default=0.01)
+    p.add_argument("--lambda_p",    type=float, default=0.2)
 
     # Muon
     p.add_argument("--muon_lr", type=float, default=0.02)
@@ -135,7 +134,6 @@ def run_training(args):
         experts=args.experts,
         base=args.rope_base, dropout=args.dropout,
         ponder_beta=args.ponder_beta, lambda_p=args.lambda_p,
-        balance_beta=args.balance_beta,
     )
 
     n_params = sum(p.numel() for p in model.parameters())
