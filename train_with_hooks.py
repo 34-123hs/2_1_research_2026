@@ -336,7 +336,7 @@ def print_console_report(step: int,
 class HookedTrainer(Trainer):
     def __init__(self, *args, collector: HookCollector, depth: int,
                  balance_beta: float, log_per_layer: bool,
-                 print_console: bool, **kwargs):
+                 print_console: bool, log_grad_detail: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         # HF Trainer >=4.46 GA loss bug fix
         self.model_accepts_loss_kwargs = False
@@ -346,10 +346,12 @@ class HookedTrainer(Trainer):
         self._balance_beta = balance_beta
         self._log_per_layer = log_per_layer
         self._print_console = print_console
+        self._log_grad_detail = log_grad_detail
         self._last_aux_metrics = {}
         self._last_cert_matrix = None
         self._last_per_layer = {}
         self._last_grad_norms = None  # list[float] len=depth
+        self._last_grad_detail = None  # (qkv:list, experts:list[list])
 
     def _compute_layer_grad_norms(self):
         out = []
@@ -364,12 +366,31 @@ class HookedTrainer(Trainer):
             out.append(math.sqrt(sq))
         return out
 
+    def _compute_grad_detail(self):
+        """layer별 Attention QKV grad-norm + layer·전문가별 grad-norm (L2)."""
+        qkv, experts = [], []
+        for atten, amoe in self.model.transformer.layers:
+            g = atten.to_qkv.weight.grad
+            qkv.append(math.sqrt(float(g.detach().float().pow(2).sum()))
+                       if g is not None else float("nan"))
+            row = []
+            for expert in amoe.moe.experts:
+                sq = 0.0
+                for prm in expert.parameters():
+                    if prm.grad is not None:
+                        sq += float(prm.grad.detach().float().pow(2).sum())
+                row.append(math.sqrt(sq))
+            experts.append(row)
+        return qkv, experts
+
     def training_step(self, model, inputs, num_items_in_batch=None):
         loss = super().training_step(model, inputs,
                                      num_items_in_batch=num_items_in_batch)
         # 마지막 micro-batch (accumulation sync) 직후, optimizer.step 직전 캡쳐
         if self.accelerator.sync_gradients:
             self._last_grad_norms = self._compute_layer_grad_norms()
+            if self._log_grad_detail:
+                self._last_grad_detail = self._compute_grad_detail()
         return loss
 
     def compute_loss(self, model, inputs, return_outputs=False,
@@ -410,6 +431,14 @@ class HookedTrainer(Trainer):
             gn_total = math.sqrt(sum(g * g for g in gn)) if gn else float("nan")
             if gn:
                 logs["grad_norm/global_l2"] = gn_total
+
+            if self._log_grad_detail and self._last_grad_detail is not None:
+                gd_qkv, gd_exp = self._last_grad_detail
+                for li, v in enumerate(gd_qkv):
+                    logs[f"grad_norm/qkv/L{li}"] = v
+                for li, row in enumerate(gd_exp):
+                    for e, v in enumerate(row):
+                        logs[f"grad_norm/expert{e}/L{li}"] = v
 
             print(f"[Aux step={step}] balance={b_l:.4f}  router_max={r_max:.3f}  "
                   f"router_ent_norm={r_ent:.3f}  halt_mean_step={h_ms:.2f}  "
@@ -503,12 +532,16 @@ def parse_args():
                    help="Muon (2D hidden weight) learning rate")
     p.add_argument("--muon_momentum", type=float, default=0.95)
     p.add_argument("--weight_decay", type=float, default=0.1)
+    p.add_argument("--max_grad_norm", type=float, default=1.0,
+                   help="gradient clipping max-norm (<=0이면 클리핑 비활성)")
 
     # logging
     p.add_argument("--log_per_layer", action="store_true",
                    help="per-layer 스칼라 80+개를 wandb에 기록 (산만함)")
     p.add_argument("--print_console", action="store_true",
                    help="매 logging_steps마다 콘솔에 per-layer 표 + heatmap")
+    p.add_argument("--log_grad_detail", action="store_true",
+                   help="layer별 QKV grad_norm + layer·전문가별 grad_norm을 wandb 스칼라로 기록")
 
     return p.parse_args()
 
@@ -614,6 +647,7 @@ def run_training(args):
         dataloader_pin_memory=True,
         seed=args.seed,
         max_steps=max_steps,
+        max_grad_norm=args.max_grad_norm,
     )
 
     optimizer = create_muon_optimizer(model, args)
@@ -630,6 +664,7 @@ def run_training(args):
         balance_beta=args.balance_beta,
         log_per_layer=args.log_per_layer,
         print_console=args.print_console,
+        log_grad_detail=args.log_grad_detail,
     )
     trainer.train()
 
