@@ -28,3 +28,7 @@ Thumbs.db
 # 에디터
 .vscode/
 .idea/
+
+# hook 모니터링 출력/로그
+hooks_outputs/
+*.log
