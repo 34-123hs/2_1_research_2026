@@ -50,6 +50,7 @@ from transformers import (
 import wandb
 from model import LLM, TiktokenHFWrapper, MemmapDataset
 from optim import build_muon_optimizer
+from config import add_base_args
 
 
 # ============================================================
@@ -483,39 +484,9 @@ def install_signal_handlers():
 
 def parse_args():
     p = argparse.ArgumentParser()
+    add_base_args(p, output_dir_default="hooks_outputs")
 
-    # paths / wandb
-    p.add_argument("--project", default=None)
-    p.add_argument("--run_name", default=None)
-    p.add_argument("--train_bin_path", default="train.bin")
-    p.add_argument("--val_bin_path", default="val.bin")
-    p.add_argument("--output_dir", default="hooks_outputs")
-
-    # data + schedule
-    p.add_argument("--block_size", type=int, default=512)
-    p.add_argument("--batch_size", type=int, default=8)
-    p.add_argument("--grad_accum", type=int, default=4)
-    p.add_argument("--max_size", type=int, default=50_000_000)
-    p.add_argument("--max_val_size", type=int, default=500_000)
-    p.add_argument("--epochs", type=int, default=3)
-    p.add_argument("--warmup_steps", type=int, default=100)
-    p.add_argument("--eval_interval", type=int, default=50)
-    p.add_argument("--seed", type=int, default=576)
-
-    # model
-    p.add_argument("--dim", type=int, default=512)
-    p.add_argument("--depth", type=int, default=6)
-    p.add_argument("--heads", type=int, default=8)
-    p.add_argument("--dim_head", type=int, default=64)
-    p.add_argument("--mlp_dim", type=int, default=2048,
-                   help="현재 무효 — MoE 내부 4*dim 하드코딩")
-    p.add_argument("--rope_base", type=int, default=10000)
-    p.add_argument("--dropout", type=float, default=0.0)
-
-    # AMoE + balance
-    p.add_argument("--experts",     type=int,   default=4)
-    p.add_argument("--ponder_beta", type=float, default=0.01)
-    p.add_argument("--lambda_p",    type=float, default=0.2)
+    # AMoE load-balance
     p.add_argument("--balance_beta", type=float, default=0.01,
                    help="Switch Transformer load-balance aux weight")
 
@@ -525,13 +496,7 @@ def parse_args():
     p.add_argument("--router_bias_init_std", type=float, default=0.02,
                    help="MoE.gate.bias 초기화 std (0이면 비활성)")
 
-    # Muon
-    p.add_argument("--lr", type=float, default=3e-4,
-                   help="AdamW (embedding/head/bias/norm) learning rate")
-    p.add_argument("--muon_lr", type=float, default=0.02,
-                   help="Muon (2D hidden weight) learning rate")
-    p.add_argument("--muon_momentum", type=float, default=0.95)
-    p.add_argument("--weight_decay", type=float, default=0.1)
+    # gradient clipping
     p.add_argument("--max_grad_norm", type=float, default=1.0,
                    help="gradient clipping max-norm (<=0이면 클리핑 비활성)")
 

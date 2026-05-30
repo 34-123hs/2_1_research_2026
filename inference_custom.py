@@ -6,6 +6,7 @@ import os
 import argparse
 import torch
 from model import LLM, TiktokenHFWrapper
+from generate import sample_next_token
 
 
 def parse_args():
@@ -57,16 +58,7 @@ def generate(model, input_ids, max_new_tokens, temperature, top_k, eos_id, devic
 
     for _ in range(max_new_tokens):
         logits = model(generated).logits[:, -1, :]  # [1, V]
-
-        if temperature != 1.0:
-            logits = logits / temperature
-
-        if top_k > 0:
-            topk_vals, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-            logits[logits < topk_vals[:, -1:]] = float('-inf')
-
-        probs = torch.softmax(logits, dim=-1)
-        next_token = torch.multinomial(probs, num_samples=1)  # [1, 1]
+        next_token = sample_next_token(logits, temperature, top_k)  # [1, 1]
 
         if next_token.item() == eos_id:
             break
