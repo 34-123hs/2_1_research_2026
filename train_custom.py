@@ -4,7 +4,6 @@ train_custom.py
 
 import os
 import math
-import signal
 import argparse
 import torch
 import numpy as np
@@ -17,34 +16,13 @@ import wandb
 from model import LLM, TiktokenHFWrapper, MemmapDataset
 from optim import build_muon_optimizer
 from config import add_base_args
+from train_common import install_signal_handlers, init_wandb
 
-
-
-def install_signal_handlers():
-    def _handler(signum, frame):
-        print(f"signal {signum} → cleanup", flush=True)
-        try:
-            if wandb.run is not None:
-                wandb.finish(exit_code=143, quiet=True)
-        finally:
-            os._exit(143)
-    signal.signal(signal.SIGTERM, _handler)
-    signal.signal(signal.SIGINT, _handler)
 
 def parse_args():
     p = argparse.ArgumentParser()
     add_base_args(p, output_dir_default="custom-llm-out")
     return p.parse_args()
-
-
-def init_wandb(args):
-    wandb.init(project=args.project, name=args.run_name, config=vars(args),
-               allow_val_change=True)
-    for k, v in dict(wandb.config).items():
-        if hasattr(args, k):
-            setattr(args, k, v)
-    print(f"args={vars(args)}")
-    return args
 
 
 def run_training(args):

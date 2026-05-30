@@ -36,11 +36,9 @@ wandb:
 
 import os
 import math
-import signal
 import argparse
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 from transformers import (
     Trainer,
@@ -51,6 +49,8 @@ import wandb
 from model import LLM, TiktokenHFWrapper, MemmapDataset
 from optim import build_muon_optimizer
 from config import add_base_args
+from train_common import install_signal_handlers, init_wandb
+from diagnostics import switch_gate_stats
 
 
 # ============================================================
@@ -148,17 +148,12 @@ def compute_aux_and_metrics(collector: HookCollector,
             device = "cuda" if torch.cuda.is_available() else "cpu"
             return torch.zeros((), device=device), metrics, None, empty_table
 
-        E = gate_logits[0].size(-1)
         bal, mxs, ents = [], [], []
         for gl in gate_logits:
-            p = F.softmax(gl.float(), dim=-1)
-            sel = p.argmax(dim=-1)
-            f = F.one_hot(sel, num_classes=E).to(p.dtype).mean(dim=0)
-            P = p.mean(dim=0)
-            bal.append(E * (f * P).sum())
-            mxs.append(f.max().detach())
-            ents.append((-(p * p.clamp_min(1e-12).log()).sum(-1).mean()
-                        / math.log(E)).detach())
+            b, mx, ent = switch_gate_stats(gl)
+            bal.append(b)
+            mxs.append(mx)
+            ents.append(ent)
         balance_loss = torch.stack(bal).mean()
         metrics["aux/balance_loss"] = float(balance_loss.detach())
         metrics["router/max_pct_global"] = float(torch.stack(mxs).mean())
@@ -166,7 +161,6 @@ def compute_aux_and_metrics(collector: HookCollector,
         return balance_loss, metrics, None, empty_table
 
     # 정상 경로: depth × step_count_per_layer 모양으로 walk
-    E = gate_logits[0].size(-1)
     spl = n_gate // depth  # steps per layer
     per_layer_bal_t = []   # grad-alive scalar tensors
     per_layer_max = []
@@ -176,14 +170,10 @@ def compute_aux_and_metrics(collector: HookCollector,
         bal_t, mx_t, ent_t = [], [], []
         for _t in range(spl):
             gl = gate_logits[idx]; idx += 1
-            p = F.softmax(gl.float(), dim=-1)
-            sel = p.argmax(dim=-1)
-            f = F.one_hot(sel, num_classes=E).to(p.dtype).mean(dim=0)
-            P = p.mean(dim=0)
-            bal_t.append(E * (f * P).sum())
-            mx_t.append(f.max().detach())
-            ent_t.append((-(p * p.clamp_min(1e-12).log()).sum(-1).mean()
-                         / math.log(E)).detach())
+            b, mx, ent = switch_gate_stats(gl)
+            bal_t.append(b)
+            mx_t.append(mx)
+            ent_t.append(ent)
         per_layer_bal_t.append(torch.stack(bal_t).mean())
         per_layer_max.append(float(torch.stack(mx_t).mean()))
         per_layer_ent.append(float(torch.stack(ent_t).mean()))
@@ -470,18 +460,6 @@ class HookedTrainer(Trainer):
 # Boilerplate (signals, args, wandb, optimizer)
 # ============================================================
 
-def install_signal_handlers():
-    def _handler(signum, frame):
-        print(f"signal {signum} → cleanup", flush=True)
-        try:
-            if wandb.run is not None:
-                wandb.finish(exit_code=143, quiet=True)
-        finally:
-            os._exit(143)
-    signal.signal(signal.SIGTERM, _handler)
-    signal.signal(signal.SIGINT, _handler)
-
-
 def parse_args():
     p = argparse.ArgumentParser()
     add_base_args(p, output_dir_default="hooks_outputs")
@@ -509,17 +487,6 @@ def parse_args():
                    help="layer별 QKV grad_norm + layer·전문가별 grad_norm을 wandb 스칼라로 기록")
 
     return p.parse_args()
-
-
-def init_wandb(args):
-    wandb.init(project=args.project, name=args.run_name, config=vars(args),
-               allow_val_change=True)
-    # sweep override 반영
-    for k, v in dict(wandb.config).items():
-        if hasattr(args, k):
-            setattr(args, k, v)
-    print(f"args={vars(args)}")
-    return args
 
 
 # ============================================================
