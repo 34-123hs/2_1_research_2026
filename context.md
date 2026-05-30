@@ -41,6 +41,10 @@ Key files:
 - `train_with_hooks.py` — alt training entry with forward-hook diagnostics + Switch balance loss.
 - `inference_custom.py` — inference / generation entry (sampling loop).
 - `stability_check.py` — 1-batch forward+backward diagnostic (NaN / grad / router / halting).
+- `optim.py` (split/build Muon optimizer), `config.py` (`add_base_args`), `generate.py`
+  (`sample_next_token`), `diagnostics.py` (`switch_gate_stats`), `train_common.py`
+  (signal/wandb helpers) — pure/shared wrapper modules extracted from the entry points.
+- `tests/` — CPU smoke + unit tests (`pytest tests/ -q`, no GPU). `README.md` — usage.
 - `muon.py` — Muon optimizer library. `launch_agent.py` + `sweep.yaml` — W&B sweep driver.
 
 ---
@@ -106,10 +110,17 @@ Pass criteria: loss finite & decreasing, no NaN/Inf; `AMoE.forward` inference lo
 
 ---
 
-## 5. Deferred / possible next direction
+## 5. CPU-side wrapper refactor — DONE (checkpoints on `main`)
 
-A larger refactor was designed and approved earlier but **only the model merge was executed**. The
-deferred part: split into an `amoe/` package separating **pure functions** (losses / optim / config /
-generate / diagnostics) from thin **effectful shells** (train / infer / sweep), and de-duplicate the
-optimizer-split / arg-parse / wandb-init logic shared by `train_custom.py` and `train_with_hooks.py`.
-Re-propose if the user wants it. (Original plan: previous session's plan file.)
+Executed on CPU (torch installed locally) before moving to GPU, as incremental git checkpoints:
+- **Stage 0** — `tests/` harness + merge runtime verification (forward/back, early-exit, generate).
+- **Stage 1** — `optim.py`: deduped the identical `create_muon_optimizer` from both training entries.
+- **Stage 2** — `generate.py` (pure sampling) + `config.py` (`add_base_args` arg dedup).
+- **Stage 3** — `diagnostics.py` (`switch_gate_stats`) + `train_common.py` (signal/wandb dedup).
+- **Stage 4** — `README.md` + this update.
+
+Ownership boundary held throughout: **`model.py` was NOT touched** by the refactor; only wrapper code
+was restructured. All wrapper-side pure logic now lives in standalone, unit-tested modules.
+
+**Optional next step (not done):** repackage the flat modules into an `amoe/` package (rewrites all
+imports). Deferred as low-value / higher-risk; do only if requested.
