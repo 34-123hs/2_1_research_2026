@@ -48,8 +48,8 @@ from transformers import (
     DataCollatorForLanguageModeling,
 )
 import wandb
-from muon import SingleDeviceMuonWithAuxAdam as MuonWithAuxAdam
 from model import LLM, TiktokenHFWrapper, MemmapDataset
+from optim import build_muon_optimizer
 
 
 # ============================================================
@@ -557,28 +557,6 @@ def init_wandb(args):
     return args
 
 
-def create_muon_optimizer(model, args):
-    hidden, other = [], []
-    for name, p in model.named_parameters():
-        if not p.requires_grad:
-            continue
-        if p.ndim == 2 and "embedding" not in name and "mlp_head" not in name:
-            hidden.append(p)
-        else:
-            other.append(p)
-
-    n_h = sum(p.numel() for p in hidden)
-    n_o = sum(p.numel() for p in other)
-    print(f"[Optimizer] Muon params={n_h:,}  Aux params={n_o:,}")
-
-    return MuonWithAuxAdam([
-        dict(params=hidden, lr=args.muon_lr, momentum=args.muon_momentum,
-             weight_decay=args.weight_decay, use_muon=True),
-        dict(params=other, lr=args.lr,
-             weight_decay=args.weight_decay, use_muon=False),
-    ])
-
-
 # ============================================================
 # Main
 # ============================================================
@@ -650,7 +628,7 @@ def run_training(args):
         max_grad_norm=args.max_grad_norm,
     )
 
-    optimizer = create_muon_optimizer(model, args)
+    optimizer = build_muon_optimizer(model, args)
 
     trainer = HookedTrainer(
         model=model,

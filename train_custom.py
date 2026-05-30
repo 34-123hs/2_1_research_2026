@@ -14,8 +14,8 @@ from transformers import (
     DataCollatorForLanguageModeling,
 )
 import wandb
-from muon import SingleDeviceMuonWithAuxAdam as MuonWithAuxAdam
 from model import LLM, TiktokenHFWrapper, MemmapDataset
+from optim import build_muon_optimizer
 
 
 
@@ -77,47 +77,6 @@ def init_wandb(args):
     return args
 
 
-def create_muon_optimizer(model, args):
-    hidden_matrix_params = []
-    other_params = []
-
-    for name, p in model.named_parameters():
-        if not p.requires_grad:
-            continue
-
-        use_muon = (
-            p.ndim == 2
-            and "embedding" not in name
-            and "mlp_head" not in name
-        )
-
-        if use_muon:
-            hidden_matrix_params.append(p)
-        else:
-            other_params.append(p)
-
-    n_muon = sum(p.numel() for p in hidden_matrix_params)
-    n_other = sum(p.numel() for p in other_params)
-    print(f"[Optimizer] Muon params={n_muon:,}  Aux params={n_other:,}")
-
-    param_groups = [
-        dict(
-            params=hidden_matrix_params,
-            lr=args.muon_lr,
-            momentum=args.muon_momentum,
-            weight_decay=args.weight_decay,
-            use_muon=True,
-        ),
-        dict(
-            params=other_params,
-            lr=args.lr,
-            weight_decay=args.weight_decay,
-            use_muon=False,
-        ),
-    ]
-    return MuonWithAuxAdam(param_groups)
-
-
 def run_training(args):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -172,7 +131,7 @@ def run_training(args):
         max_steps=max_steps,
     )
 
-    optimizer = create_muon_optimizer(model, args)
+    optimizer = build_muon_optimizer(model, args)
 
     trainer = Trainer(
         model=model,
