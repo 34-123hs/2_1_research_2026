@@ -20,7 +20,7 @@ import numpy as np
 import torch
 from safetensors.torch import load_file
 
-from custom_model_train import LLM, MemmapDataset, TiktokenHFWrapper
+from model import LLM, MemmapDataset, TiktokenHFWrapper
 
 
 # ============================================================================

@@ -15,7 +15,7 @@ from transformers import (
 )
 import wandb
 from muon import SingleDeviceMuonWithAuxAdam as MuonWithAuxAdam
-from custom_model_train import LLM, TiktokenHFWrapper, MemmapDataset
+from model import LLM, TiktokenHFWrapper, MemmapDataset
 
 
 

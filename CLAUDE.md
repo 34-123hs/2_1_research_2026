@@ -25,14 +25,14 @@ wandb agent <entity>/<project>/<sweep-id>
 
 ## Architecture
 
-Model classes live in `custom_model_train.py` (training) and `custom_model_inference.py` (inference). Standard pre-norm decoder-only transformer:
+Model classes live in `model.py` (shared by training and inference; behavior differs only via `self.training`). Standard pre-norm decoder-only transformer:
 
 - `RoPE` — rotary positional embeddings; sin/cos buffers registered at init, applied per-layer in attention
 - `Attention` — multi-head self-attention with RMSNorm pre-norm, causal mask via `scaled_dot_product_attention`
 - `MoE` — top-1 routed mixture of experts. Each expert is RMSNorm → Linear(dim → 4·dim) → GELU → Linear(4·dim → dim) with dropout. Also produces a per-token `certainty` scalar via a sigmoid head used by `AMoE`
-- `AMoE` — adaptive computation wrapper around `MoE`. Runs up to `max_steps` (default 10) MoE iterations per token; per-step `certainty` accumulates and tokens "halt" once cumulative certainty ≥ 1−eps. Returns `(sum_logit, halting_probs)` in the training file and just `sum_logit` in the inference file. Training version uses gradient checkpointing on each MoE call
-- `Transformer` — stacks `(Attention, AMoE)` pairs with residual connections, final RMSNorm. Training version also surfaces per-layer `halting_probs` for the PonderNet loss
-- `LLM` — embedding → dropout → Transformer → linear head. Training version computes `task_loss + ponder_beta * KL(halting || geometric_prior(lambda_p))`; inference version computes logits only
+- `AMoE` — adaptive computation wrapper around `MoE`. Runs up to `max_steps` (default 10) MoE iterations per token; per-step `certainty` accumulates and tokens "halt" once cumulative certainty ≥ 1−eps. Returns `(sum_logit, halting_probs)`. The vertical loop runs a fixed `max_steps` in training, but at inference breaks early once every token has halted. Gradient checkpointing is applied per MoE call only when `self.training`
+- `Transformer` — stacks `(Attention, AMoE)` pairs with residual connections, final RMSNorm. Surfaces per-layer `halting_probs` for the PonderNet loss
+- `LLM` — embedding → dropout → Transformer → linear head. Computes `task_loss + ponder_beta * KL(halting || geometric_prior(lambda_p))` when `labels` are given (training); returns logits only otherwise (inference)
 
 ### Tokenizer
 

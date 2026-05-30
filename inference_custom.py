@@ -5,7 +5,7 @@ inference_custom.py
 import os
 import argparse
 import torch
-from custom_model_inference import LLM, TiktokenHFWrapper
+from model import LLM, TiktokenHFWrapper
 
 
 def parse_args():
