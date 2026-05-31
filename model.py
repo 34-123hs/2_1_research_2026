@@ -80,20 +80,18 @@ class MoE(nn.Module):
         output: 없음.
         """
         super().__init__()
-        self.gate = nn.Linear(dim, experts)              # [D] → [E] 라우팅 로짓
-        self.how_much_certainty = nn.Linear(dim, 1)      # [D] → [1] 확신도 로짓
-        self.experts = nn.ModuleList([
-            nn.Sequential(
-                nn.RMSNorm(dim),
-                nn.Dropout(dropout),
-                nn.Linear(dim, 4 * dim),
-                nn.GELU(),
-                nn.Dropout(dropout),
-                nn.Linear(4 * dim, dim),
-                nn.Dropout(dropout),
-            ) for _ in range(experts)
-        ])
+        self.dim = dim
+        self.num_experts = experts
+        self.gate = nn.Linear(dim, experts)              # [D] → [E] 각 전문가당 확신도 출력 -> 가장 확신도가 높은 전문가한테 라우팅
+        self.norm = nn.RMSNorm(dim)
 
+        self.expert1 = nn.Parameter(torch.empty(experts, dim, hidden_dim)) # [D, H] Linear 8개를 묶음
+        self.expert2 = nn.Parameter(torch.empty(experts, hidden_dim, dim + 1)) # [H, D] Linear 8개를 묶음
+
+        nn.init.xavier_uniform_(self.expert1) #가중치 초기화
+        nn.init.xavier_uniform_(self.expert2) #가중치 초기화
+
+        
     def forward(self, x):
         """
         input : x [S, D]   (S = B*N, 토큰 평탄화)
@@ -102,20 +100,40 @@ class MoE(nn.Module):
         """
         gate_probs = F.softmax(self.gate(x), dim=-1)            # [S, E]
         weights, selected = torch.topk(gate_probs, 1, dim=-1)   # 각 [S, 1]
-        weights  = weights.squeeze(-1)                          # [S]
-        selected = selected.squeeze(-1)                         # [S]
+        expert_mask = F.one_hot(selected.squeeze(-1), num_classes=self.num_experts).to(x.dtype) #[S, E]
+        
 
-        certainty = torch.sigmoid(self.how_much_certainty(x))   # [S, 1]
+        #X 정렬시키기
+        sort_idx = torch.argsort(selected.squeeze(-1)) # [S]
+        x_sorted = x[sort_idx] # 전문가 순서대로 정렬된 토큰들 [S, D]
 
-        results = torch.zeros_like(x)                           # [S, D]
-        for i, expert in enumerate(self.experts):
-            s_idx, = torch.where(selected == i)                 # 전문가 i가 맡은 토큰 인덱스
-            if s_idx.numel() == 0:
+        # 전문가마다 자르기 / [input1, input2, ...]
+        tokens_per_expert = expert_mask.sum(dim=0, dtype=torch.long) # [E]
+        expert_inputs = torch.split(x_sorted, tokens_per_expert.tolist(), dim=0)
+        expert_outputs = []
+
+        # 자른 거를 연산하기
+        for i in range(self.num_experts):
+            if expert_inputs[i].size(0) == 0:
+                # 해당 전문가에게 할당된 토큰이 없으면 빈 텐서 추가
+                expert_outputs.append(expert_inputs[i].new_empty(0, self.dim+1))
                 continue
-            tokens = x[s_idx]                                   # [matched, D]
-            out = expert(tokens)                                # [matched, D]
-            results[s_idx] = weights[s_idx, None] * out         # 게이트 가중치 곱해 자리 채움
+            
+            expert_inputs[i] = self.norm(expert_inputs[i])
+            # i번째 전문가 연산 진행 (ex1 곱하고 GELU 거쳐 ex2 곱하기)
+            h = F.gelu(torch.matmul(expert_inputs[i], self.expert1[i]))
+            out = torch.matmul(h, self.expert2[i])           # [S, D+1]
+            expert_outputs.append(out)
 
+        #연산된 자른거를 합치기
+        combined_outputs = torch.cat(expert_outputs, dim=0) # [S, D+1] (정렬된 상태)
+
+        results = torch.empty_like(combined_outputs)
+
+        results[sort_idx] = combined_outputs # [S, D+1] (원래 순서 복원)
+
+        results, certainty = results[:, :-1] * weights, F.sigmoid(results[:, -1:])
+        
         return results, certainty
 
 
@@ -131,73 +149,81 @@ class AMoE(nn.Module):
 
     def __init__(self, dim, hidden_dim, experts, dropout=0.,
                  max_steps=10, eps=1e-2, use_checkpoint=True):
-        """
-        input : dim, hidden_dim, experts, dropout — MoE에 전달
-                max_steps (int)   수직 루프 최대 반복 수
-                eps       (float) halt 임계 여유 (누적 certainty >= 1-eps면 halt)
-                use_checkpoint (bool) 학습 중 gradient checkpointing 사용 여부
-        output: 없음.
-        """
         super().__init__()
+        # 외부에서 정의된 MoE 클래스를 사용한다고 가정
         self.moe = MoE(dim=dim, hidden_dim=hidden_dim, experts=experts, dropout=dropout)
         self.max_steps = max_steps
         self.eps = eps
         self.use_checkpoint = use_checkpoint
 
     def _moe_call(self, flat):
-        """
-        checkpointing 래퍼. 학습 중에만 checkpoint 적용(메모리 절약).
-        input : flat [B*N, D]
-        output: ([B*N, D], [B*N, 1])  MoE의 (results, certainty)
-        """
         if self.use_checkpoint and self.training:
             return checkpoint(self.moe, flat, use_reentrant=False)
         return self.moe(flat)
 
     def forward(self, x):
-        """
-        토큰별 적응적 반복(Adaptive Computation): MoE를 최대 max_steps번 반복하되,
-        토큰별 누적 certainty가 1-eps를 넘으면 그 토큰은 halt(동결)된다.
-
-        input : x [B, N, D]   (B=배치, N=시퀀스 길이, D=모델 차원)
-        output: sum_logit     [B, N, D]   step_cert로 가중합된 MoE 출력
-                halting_probs  [T, B, N]   각 스텝의 step_cert (PonderNet 손실용), T<=max_steps
-        """
         B, N, D = x.shape
         state          = x                                  # [B, N, D] 현재 토큰 상태
         sum_certainty  = torch.zeros_like(state[..., :1])   # [B, N, 1] 누적 확신도
         sum_logit      = torch.zeros_like(state)            # [B, N, D] 누적 출력
 
-        halting_probs = []  # 매 스텝의 step_cert를 모음 (정규화/손실용)
+        halting_probs = []  
 
         for t in range(self.max_steps):
-            flat = state.reshape(B * N, D)                  # [B*N, D] MoE는 토큰 평탄화 입력
-            new_flat, cert_flat = self._moe_call(flat)      # [B*N, D], [B*N, 1]
-            new_state = new_flat.reshape(B, N, D)           # [B, N, D]
-            cert      = cert_flat.reshape(B, N, 1)          # [B, N, 1] 이번 스텝 확신도
+            # =====================================================================
+            # [수정된 부분 시작: 동적 텐서 추출을 통한 True Sparsity (FLOPs 절약) 구현]
+            # =====================================================================
+            flat = state.view(B * N, D)
+            sum_cert_flat = sum_certainty.view(B * N)
+
+            # 1. 활성 토큰 마스크 생성 (이번 스텝에 연산이 필요한 토큰만 True)
+            active_mask = sum_cert_flat < (1 - self.eps)
+
+            # Inference 시 모든 토큰이 halt 상태면 즉시 조기 종료 (행렬 곱 원천 차단)
+            if not self.training and not active_mask.any():
+                break
+
+            # 2. 활성 토큰만 메모리에서 추출 (텐서 크기가 [B*N, D]에서 [Num_Active, D]로 동적 축소됨)
+            active_tokens = flat[active_mask]  # [S, D]
+            
+            # 결과를 담을 빈 텐서 (halt된 토큰은 0으로 남음)
+            new_flat = torch.zeros_like(flat)
+            cert_flat = torch.zeros_like(sum_cert_flat).unsqueeze(-1) # [B*N, 1]
+
+            # 3. 추출된 토큰이 있을 때만 MoE 연산 수행 (핵심 연산량 감소 구간)
+            if active_tokens.numel() > 0:
+                new_active, cert_active = self._moe_call(active_tokens)
+                
+                # 4. 연산된 결과를 원래 배치 위치로 복원 (Scatter)
+                new_flat[active_mask] = new_active
+                cert_flat[active_mask] = cert_active
+
+            # 다시 3차원으로 복구
+            new_state = new_flat.view(B, N, D)
+            cert      = cert_flat.view(B, N, 1)
+            # =====================================================================
+            # [수정된 부분 끝]
+            # =====================================================================
 
             # active: 아직 halt 안 된 토큰만 기여(1), halt된 토큰은 0
             active = (sum_certainty < 1 - self.eps).to(cert.dtype)  # [B, N, 1]
 
             if t == self.max_steps - 1:
                 # 마지막 스텝: 남은 mass 전부 할당
-                step_cert = (1 - sum_certainty) * active            # [B, N, 1]
+                step_cert = (1 - sum_certainty) * active            
             else:
-                step_cert = torch.min(1 - sum_certainty, cert) * active  # [B, N, 1]
+                step_cert = torch.min(1 - sum_certainty, cert) * active  
 
-            sum_logit     = sum_logit + new_state * step_cert  # [B, N, D] step_cert 가중 누적
-            sum_certainty = sum_certainty + step_cert          # [B, N, 1]
-            # state는 active 토큰만 갱신, halted는 freeze
-            state = torch.where(active > 0.5, new_state, state)  # [B, N, D]
+            sum_logit     = sum_logit + new_state * step_cert  
+            sum_certainty = sum_certainty + step_cert          
+            
+            # state는 active 토큰만 갱신, halted는 freeze (위에서 0으로 복원되었으므로 기존 state 유지)
+            state = torch.where(active > 0.5, new_state, state)  
 
-            halting_probs.append(step_cert.squeeze(-1))     # [B, N]
+            halting_probs.append(step_cert.squeeze(-1))     
 
-            # inference: 모든 토큰이 halt되면 남은 스텝은 step_cert=0이라 출력에 무의미 → break
-            # train: self.training=True 이므로 이 분기는 절대 안 탐 → 항상 max_steps 고정
-            if not self.training and bool((sum_certainty >= 1 - self.eps).all()):
-                break
-
-        halting_probs = torch.stack(halting_probs, dim=0)   # [T, B, N]  (train이면 T=max_steps)
+        halting_probs = torch.stack(halting_probs, dim=0)   # [T, B, N]
+        print(sum_logit.shape, halting_probs.shape)
         return sum_logit, halting_probs
 
 
@@ -438,3 +464,6 @@ class MemmapDataset(Dataset):
         end = start + self.block_size
         x = torch.from_numpy(self.data[start:end].astype(np.int64))   # [block_size]
         return {"input_ids": x}
+
+if __name__ == '__main__':
+    pass
