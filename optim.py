@@ -12,8 +12,11 @@ from muon import SingleDeviceMuonWithAuxAdam as MuonWithAuxAdam
 def split_params(model):
     """
     Partition trainable params into the Muon group and the AdamW aux group.
-    Rule: a 2D weight matrix that is NOT an embedding and NOT the LM head goes
-    to Muon; everything else (embeddings, `mlp_head`, biases, norms) goes to aux.
+    Rule: a weight matrix of ndim>=2 that is NOT an embedding and NOT the LM head
+    goes to Muon (this now includes the 3D grouped-expert tensors expert1/expert2 —
+    muon.py's Newton-Schulz is batched over the last 2 dims, so each [D,H] expert
+    matrix is orthogonalized); everything else (embeddings, `mlp_head`, biases,
+    norms) goes to aux.
 
     input : model (nn.Module)
     output: (muon_params, aux_params) — two disjoint lists of nn.Parameter whose
@@ -23,7 +26,7 @@ def split_params(model):
     for name, p in model.named_parameters():
         if not p.requires_grad:
             continue
-        use_muon = p.ndim == 2 and "embedding" not in name and "mlp_head" not in name
+        use_muon = p.ndim >= 2 and "embedding" not in name and "mlp_head" not in name
         (muon_params if use_muon else aux_params).append(p)
     return muon_params, aux_params
 

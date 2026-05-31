@@ -194,8 +194,10 @@ class AMoE(nn.Module):
                 new_active, cert_active = self._moe_call(active_tokens)
                 
                 # 4. 연산된 결과를 원래 배치 위치로 복원 (Scatter)
-                new_flat[active_mask] = new_active
-                cert_flat[active_mask] = cert_active
+                # autocast(fp16/bf16)에서 MoE 출력 dtype이 new_flat/cert_flat(fp32)과
+                # 다를 수 있어 dst dtype에 맞춰 캐스팅 (누적은 fp32로 유지)
+                new_flat[active_mask] = new_active.to(new_flat.dtype)
+                cert_flat[active_mask] = cert_active.to(cert_flat.dtype)
 
             # 다시 3차원으로 복구
             new_state = new_flat.view(B, N, D)
