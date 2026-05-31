@@ -119,9 +119,8 @@ class MoE(nn.Module):
                 expert_outputs.append(expert_inputs[i].new_empty(0, self.dim+1))
                 continue
             
-            expert_inputs[i] = self.norm(expert_inputs[i])
             # i번째 전문가 연산 진행 (ex1 곱하고 GELU 거쳐 ex2 곱하기)
-            h = F.gelu(torch.matmul(expert_inputs[i], self.expert1[i]))
+            h = F.gelu(torch.matmul(self.norm(expert_inputs[i]), self.expert1[i]))
             out = torch.matmul(h, self.expert2[i])           # [S, D+1]
             expert_outputs.append(out)
 
@@ -223,7 +222,6 @@ class AMoE(nn.Module):
             halting_probs.append(step_cert.squeeze(-1))     
 
         halting_probs = torch.stack(halting_probs, dim=0)   # [T, B, N]
-        print(sum_logit.shape, halting_probs.shape)
         return sum_logit, halting_probs
 
 
