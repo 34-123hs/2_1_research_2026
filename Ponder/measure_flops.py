@@ -11,6 +11,7 @@ measure_flops.py
 import os
 import time
 import argparse
+from contextlib import nullcontext
 import numpy as np
 import torch
 from torch.utils.flop_counter import FlopCounterMode
@@ -28,6 +29,10 @@ def parse_args():
     p.add_argument("--n_tokens", type=int, default=100_000)
     p.add_argument("--batch_size", type=int, default=1)
     p.add_argument("--block_size", type=int, default=768)
+    p.add_argument("--dtype", choices=["fp32", "bf16"], default="fp32",
+                   help="wall-clock 측정 dtype (bf16=autocast). FLOPs 는 dtype 무관")
+    p.add_argument("--compile", action="store_true",
+                   help="wall-clock 측정 시 model._ponder_step 를 torch.compile (학습과 동일)")
     # 아키텍처 — 학습과 동일해야 weight 가 로드됨 (final 학습 config 기본값)
     p.add_argument("--dim", type=int, default=768)
     p.add_argument("--heads", type=int, default=12)
@@ -99,17 +104,30 @@ def main():
         run_once()
     total = counter.get_total_flops()
 
-    # (2) Wall-clock — FlopCounterMode 밖에서(dispatch 오버헤드 제거), warmup + cuda sync
+    # (2) Wall-clock — dtype/compile 옵션 적용, FlopCounterMode 밖에서 측정
+    use_amp = (args.dtype == "bf16" and cuda)
+    def amp():
+        return torch.autocast("cuda", dtype=torch.bfloat16) if use_amp else nullcontext()
+    if args.compile:
+        model._ponder_step = torch.compile(model._ponder_step)  # 학습과 동일 핫패스
     with torch.no_grad():
-        for xb in batches[:min(5, len(batches))]:   # warmup: cudnn/cuda init, 측정 제외
-            model(input_ids=xb)
+        # warmup 패스 = 첫 호출에서 compile 발생(모든 shape) + cudnn init → 시간 따로 측정
         if cuda:
             torch.cuda.synchronize()
+        tc0 = time.perf_counter()
+        with amp():
+            run_once()
+        if cuda:
+            torch.cuda.synchronize()
+        warmup_time = time.perf_counter() - tc0
+        # steady 패스 = compile 끝난 뒤 순수 추론 시간
         t0 = time.perf_counter()
-        run_once()
+        with amp():
+            run_once()
         if cuda:
             torch.cuda.synchronize()
         wall = time.perf_counter() - t0
+    compile_overhead = max(0.0, warmup_time - wall)  # 추정 compile 비용(첫 패스 − 정상 패스)
 
     # 결과
     print(f"\n===== PonderNet inference (val.bin 앞 {measured:,} tokens, batch={args.batch_size}) =====")
@@ -117,12 +135,16 @@ def main():
     print("[FLOPs]")
     print(f"  total        : {total:,}  ({total/1e9:.3f} GFLOP, {total/1e12:.4f} TFLOP)")
     print(f"  per token    : {total/measured:,.0f}  ({total/measured/1e6:.3f} MFLOP/token)")
-    print("[Wall-clock]  (eager, torch.compile 없음; warmup 후 측정)")
+    print(f"[Wall-clock]  (dtype={args.dtype}{', compile' if args.compile else ', eager'}; warmup 후 측정)")
     print(f"  total        : {wall:.4f} s")
     print(f"  throughput   : {measured/wall:,.0f} tok/s")
     print(f"  per token    : {wall/measured*1e3:.4f} ms/token")
     print(f"  per forward  : {wall/len(batches)*1e3:.3f} ms  ({len(batches)} forwards)")
     print(f"  achieved     : {total/wall/1e12:.2f} TFLOP/s")
+    if args.compile:
+        print("[Compile]")
+        print(f"  warmup(1st)  : {warmup_time:.3f} s  (compile + 첫 실행)")
+        print(f"  est. compile : {compile_overhead:.3f} s  (warmup − steady, cold cache)")
 
     # 연산별 분해 (어디서 FLOPs 가 나오는지)
     glob = counter.get_flop_counts().get("Global", {})
