@@ -9,6 +9,7 @@ measure_flops.py
 - 관례: FlopCounterMode 는 matmul 을 2·M·N·K FLOP 로 센다(곱셈+덧셈).
 """
 import os
+import time
 import argparse
 import numpy as np
 import torch
@@ -78,23 +79,50 @@ def main():
     print(f"[data] {n_tokens:,} tokens (앞에서부터) = {n_full} x {bs}"
           + (f" + 1 x {rem}" if rem else "") + f"  (batch={args.batch_size})")
 
-    # FLOPs 측정 — 실행되는 연산을 그대로 카운트
+    # 디바이스 텐서 미리 준비 → 타이밍에서 numpy 변환/H2D 전송 제외(순수 연산 시간만)
+    batches = []
+    full = arr[:n_full * bs].reshape(n_full, bs)
+    for i in range(0, n_full, args.batch_size):
+        batches.append(torch.from_numpy(full[i:i + args.batch_size]).to(device))
+    if rem:  # 자투리 토큰 (batch=1, 가변 길이)
+        batches.append(torch.from_numpy(arr[n_full * bs:].reshape(1, rem)).to(device))
+    measured = n_tokens
+    cuda = (device == "cuda")
+
+    def run_once():
+        for xb in batches:
+            model(input_ids=xb)
+
+    # (1) FLOPs — 실행된 연산을 그대로 카운트
     counter = FlopCounterMode(display=False)
     with torch.no_grad(), counter:
-        full = arr[:n_full * bs].reshape(n_full, bs)
-        for i in range(0, n_full, args.batch_size):
-            xb = torch.from_numpy(full[i:i + args.batch_size]).to(device)
-            model(input_ids=xb)
-        if rem:  # 자투리 토큰 (batch=1, 가변 길이)
-            xb = torch.from_numpy(arr[n_full * bs:].reshape(1, rem)).to(device)
-            model(input_ids=xb)
-    measured = n_tokens
-
+        run_once()
     total = counter.get_total_flops()
-    print("\n===== PonderNet inference FLOPs (val.bin, batch=1) =====")
-    print(f"total FLOPs    : {total:,}   ({total/1e9:.3f} GFLOP, {total/1e12:.4f} TFLOP)")
-    print(f"tokens         : {measured:,}")
-    print(f"FLOPs / token  : {total/measured:,.0f}   ({total/measured/1e6:.3f} MFLOP/token)")
+
+    # (2) Wall-clock — FlopCounterMode 밖에서(dispatch 오버헤드 제거), warmup + cuda sync
+    with torch.no_grad():
+        for xb in batches[:min(5, len(batches))]:   # warmup: cudnn/cuda init, 측정 제외
+            model(input_ids=xb)
+        if cuda:
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        run_once()
+        if cuda:
+            torch.cuda.synchronize()
+        wall = time.perf_counter() - t0
+
+    # 결과
+    print(f"\n===== PonderNet inference (val.bin 앞 {measured:,} tokens, batch={args.batch_size}) =====")
+    print(f"device         : {device}" + (f"  ({torch.cuda.get_device_name(0)})" if cuda else ""))
+    print("[FLOPs]")
+    print(f"  total        : {total:,}  ({total/1e9:.3f} GFLOP, {total/1e12:.4f} TFLOP)")
+    print(f"  per token    : {total/measured:,.0f}  ({total/measured/1e6:.3f} MFLOP/token)")
+    print("[Wall-clock]  (eager, torch.compile 없음; warmup 후 측정)")
+    print(f"  total        : {wall:.4f} s")
+    print(f"  throughput   : {measured/wall:,.0f} tok/s")
+    print(f"  per token    : {wall/measured*1e3:.4f} ms/token")
+    print(f"  per forward  : {wall/len(batches)*1e3:.3f} ms  ({len(batches)} forwards)")
+    print(f"  achieved     : {total/wall/1e12:.2f} TFLOP/s")
 
     # 연산별 분해 (어디서 FLOPs 가 나오는지)
     glob = counter.get_flop_counts().get("Global", {})
@@ -102,7 +130,7 @@ def main():
         print("\nper-op breakdown (Global):")
         for op, f in sorted(glob.items(), key=lambda kv: -kv[1]):
             print(f"  {str(op):42s} {f:>20,}  ({100*f/total:5.1f}%)")
-    print("\n(추론 모드 — PonderNet per-token 조기 종료가 반영된 실제 연산량입니다.)")
+    print("\n(추론 모드 — PonderNet per-token 조기 종료가 반영된 실제 연산량/시간입니다.)")
 
 
 if __name__ == "__main__":
