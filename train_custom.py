@@ -40,7 +40,7 @@ def run_training(args):
         vocab_size=tokenizer.vocab_size, padding_idx=tokenizer.pad_token_id,
         experts=args.experts,
         base=args.rope_base, dropout=args.dropout,
-        ponder_beta=args.ponder_beta, lambda_p=args.lambda_p,
+        ponder_beta=args.ponder_beta, lambda_p=args.lambda_p, alpha=args.alpha,
     )
 
     n_params = sum(p.numel() for p in model.parameters())
@@ -71,7 +71,7 @@ def run_training(args):
         eval_strategy="steps",
         eval_steps=args.eval_interval,
         save_total_limit=2,
-        fp16=torch.cuda.is_available(),
+        bf16=torch.cuda.is_available(),
         report_to="wandb",
         run_name=args.run_name,
         dataloader_pin_memory=True,

@@ -24,7 +24,9 @@ wandb/
 custom-llm-out/
 sweep_outputs/
 hooks_outputs/
+main_out/
 logs/
+.sweep_id
 
 # Model checkpoints
 *.pt

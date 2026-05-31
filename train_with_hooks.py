@@ -109,7 +109,7 @@ class HookCollector:
 
     def _amoe_hook(self, li):
         def hook(module, inputs, output):
-            _, hp = output
+            hp = output[1]  # AMoE: (sum_logit, halting_probs, total_LBL)
             self.halting_probs.append((li, hp))
         return hook
 
@@ -434,7 +434,7 @@ class HookedTrainer(Trainer):
             depth=self._depth,
             log_per_layer=self._log_per_layer,
         )
-        total = base_loss + self._balance_beta * bal_loss
+        total = base_loss  # model.py가 주는 loss가 유일한 학습 손실 (wrapper 추가 loss 없음)
 
         metrics["aux/base_loss"] = float(base_loss.detach())
         metrics["aux/total_loss"] = float(total.detach())
@@ -576,8 +576,14 @@ def run_training(args):
         mlp_dim=args.mlp_dim, heads=args.heads, dim_head=args.dim_head,
         vocab_size=tokenizer.vocab_size, padding_idx=tokenizer.pad_token_id,
         experts=args.experts, base=args.rope_base, dropout=args.dropout,
-        ponder_beta=args.ponder_beta, lambda_p=args.lambda_p,
+        ponder_beta=args.ponder_beta, lambda_p=args.lambda_p, alpha=args.alpha,
     )
+
+    # AMoE의 기존 속성을 인스턴스 단위로 세팅 (model.py 원본 불변)
+    #   ponder_steps → max_steps (수직 루프 횟수), grad_checkpoint → use_checkpoint
+    for _atten, _amoe in model.transformer.layers:
+        _amoe.max_steps = args.ponder_steps
+        _amoe.use_checkpoint = bool(args.grad_checkpoint)
 
     n_init = init_router_bias(model,
                               mean=args.router_bias_init_mean,
@@ -606,6 +612,11 @@ def run_training(args):
     print(f"[Budget] max_size={args.max_size:,} tokens → "
           f"max_steps={max_steps:,} (tokens/step={tokens_per_step:,})")
 
+    # 각 run을 고유 output_dir로 → 공유 볼륨에서 여러 agent가 같은 sweep_outputs에
+    # 체크포인트를 쓰며 충돌/덮어쓰기(save_total_limit 회전)하는 것을 방지.
+    if wandb.run is not None:
+        args.output_dir = os.path.join(args.output_dir, wandb.run.id)
+
     targs = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
@@ -620,20 +631,21 @@ def run_training(args):
         eval_strategy="steps",
         eval_steps=args.eval_interval,
         save_total_limit=2,
-        fp16=torch.cuda.is_available(),
+        bf16=torch.cuda.is_available(),
         report_to="wandb",
         run_name=args.run_name,
         dataloader_pin_memory=True,
         seed=args.seed,
         max_steps=max_steps,
         max_grad_norm=args.max_grad_norm,
+        torch_compile=bool(args.compile),
     )
 
     optimizer = build_muon_optimizer(model, args)
 
-    # raw hooked-data log file: logs/<sweep-or-run>_log.jsonl
-    tag = (wandb.run.sweep_id if (wandb.run is not None and wandb.run.sweep_id)
-           else (args.run_name or (wandb.run.id if wandb.run is not None else "run")))
+    # raw hooked-data log file: logs/<run_id>_log.jsonl (per-run → safe for concurrent agents)
+    tag = (wandb.run.id if wandb.run is not None
+           else (args.run_name or "run"))
     os.makedirs("logs", exist_ok=True)
     log_path = os.path.join("logs", f"{tag}_log.jsonl")
     print(f"[Hooks] raw hooked-data log -> {log_path}")

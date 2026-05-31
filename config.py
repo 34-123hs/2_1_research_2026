@@ -26,8 +26,8 @@ def add_base_args(parser, output_dir_default):
 
     # data + schedule
     parser.add_argument("--block_size", type=int, default=512)
-    parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--grad_accum", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=24)
+    parser.add_argument("--grad_accum", type=int, default=1)
     parser.add_argument("--max_size", type=int, default=50_000_000)
     parser.add_argument("--max_val_size", type=int, default=500_000)
     parser.add_argument("--epochs", type=int, default=3)
@@ -49,6 +49,14 @@ def add_base_args(parser, output_dir_default):
     parser.add_argument("--experts",     type=int,   default=4)
     parser.add_argument("--ponder_beta", type=float, default=0.01)
     parser.add_argument("--lambda_p",    type=float, default=0.2)
+    parser.add_argument("--alpha",       type=float, default=0.01,
+                        help="load-balance loss (LBL) weight in LLM loss")
+    parser.add_argument("--ponder_steps", type=int, default=10,
+                        help="AMoE 수직 루프 최대 횟수 (AMoE.max_steps로 세팅)")
+    parser.add_argument("--grad_checkpoint", type=int, default=1,
+                        help="1=AMoE MoE 호출에 gradient checkpointing 적용, 0=미적용")
+    parser.add_argument("--compile", type=int, default=0,
+                        help="1=torch.compile 적용 (HF Trainer torch_compile)")
 
     # Muon / AdamW
     parser.add_argument("--lr", type=float, default=3e-4,
