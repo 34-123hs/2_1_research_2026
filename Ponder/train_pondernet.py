@@ -12,6 +12,7 @@ import argparse
 import torch
 import numpy as np
 from transformers import Trainer, TrainingArguments, DataCollatorForLanguageModeling
+from transformers.trainer_utils import get_last_checkpoint
 import wandb
 
 from data import TiktokenHFWrapper, MemmapDataset
@@ -108,7 +109,11 @@ def run_training(args):
     )
     # HF Trainer >=4.46 GA loss fix (same as AMoE train_custom.py)
     trainer.model_accepts_loss_kwargs = False
-    trainer.train()
+    # 중간에 끊겨도 재실행하면 output_dir의 마지막 체크포인트에서 자동 재개(없으면 처음부터).
+    last_ckpt = get_last_checkpoint(args.output_dir) if os.path.isdir(args.output_dir) else None
+    if last_ckpt:
+        print(f"[Resume] 체크포인트에서 재개: {last_ckpt}")
+    trainer.train(resume_from_checkpoint=last_ckpt)
 
     metrics = trainer.evaluate(eval_dataset=eval_full_ds)  # val 전체(20M) 기준 최종값
     ppl = math.exp(metrics["eval_loss"]) if metrics["eval_loss"] < 20 else float("inf")
