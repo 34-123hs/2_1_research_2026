@@ -47,7 +47,7 @@ ALPHA=0.005
   --output_dir main_out \
   --max_size 2000000815 --max_val_size 200000 \
   --epochs 1 --warmup_steps 150 --eval_interval 1000 \
-  --save_steps 1000 --resume 1 \
+  --save_steps 1000 --resume 1 --max_grad_norm 1.0 \
   --block_size 768 --batch_size 48 --grad_accum 1 \
   --dim 768 --depth 12 --heads 12 --dim_head 64 --mlp_dim 3072 \
   --dropout 0 --lambda_p 0.3 --ponder_steps 8 \
