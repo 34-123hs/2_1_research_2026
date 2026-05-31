@@ -2,7 +2,7 @@
 # 등록: wandb sweep --project <my-project> sweep.yaml
 # 실행: wandb agent <entity>/<my-project>/<id>
 
-program: train_custom.py
+program: train_with_hooks.py
 
 method: bayes
 metric:
