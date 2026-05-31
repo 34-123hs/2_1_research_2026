@@ -566,6 +566,9 @@ def parse_args():
 def run_training(args):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    # TF32: fp32 matmul/cudnn 가속 (bf16 외 연산 속도↑, 정밀도 영향 미미)
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
     assert os.path.exists(args.train_bin_path), f"파일 없음: {args.train_bin_path}"
     assert os.path.exists(args.val_bin_path),   f"파일 없음: {args.val_bin_path}"

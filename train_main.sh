@@ -45,7 +45,7 @@ LR=1e-3; MUON_LR=0.02; PONDER_BETA=0.01; ALPHA=0.01
   --max_size 2000000815 --max_val_size 200000 \
   --epochs 1 --warmup_steps 150 --eval_interval 1000 \
   --save_steps 1000 --resume 1 \
-  --block_size 768 --batch_size 8 --grad_accum 6 \
+  --block_size 768 --batch_size 48 --grad_accum 1 \
   --dim 768 --depth 12 --heads 12 --dim_head 64 --mlp_dim 3072 \
   --dropout 0 --lambda_p 0.3 --ponder_steps 8 \
   --grad_checkpoint 0 --compile 0 \
