@@ -569,6 +569,7 @@ def run_training(args):
     # TF32: fp32 matmul/cudnn 가속 (bf16 외 연산 속도↑, 정밀도 영향 미미)
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True   # 입력 shape 고정 → 커널 autotune
 
     assert os.path.exists(args.train_bin_path), f"파일 없음: {args.train_bin_path}"
     assert os.path.exists(args.val_bin_path),   f"파일 없음: {args.val_bin_path}"
@@ -641,6 +642,8 @@ def run_training(args):
         report_to="wandb",
         run_name=args.run_name,
         dataloader_pin_memory=True,
+        dataloader_num_workers=4,
+        dataloader_persistent_workers=True,
         seed=args.seed,
         max_steps=max_steps,
         max_grad_norm=args.max_grad_norm,
