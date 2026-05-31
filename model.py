@@ -101,7 +101,11 @@ class MoE(nn.Module):
         gate_probs = F.softmax(self.gate(x), dim=-1)            # [S, E]
         weights, selected = torch.topk(gate_probs, 1, dim=-1)   # 각 [S, 1]
         expert_mask = F.one_hot(selected.squeeze(-1), num_classes=self.num_experts).to(x.dtype) #[S, E]
-        
+
+        #Load Balance Loss 계산
+        P_i = gate_probs.mean(dim=0)  # [E]
+        f_i = expert_mask.mean(dim=0) # [E]
+        LBL = self.num_experts * torch.sum(f_i * P_i)
 
         #X 정렬시키기
         sort_idx = torch.argsort(selected.squeeze(-1)) # [S]
@@ -133,7 +137,7 @@ class MoE(nn.Module):
 
         results, certainty = results[:, :-1] * weights, F.sigmoid(results[:, -1:])
         
-        return results, certainty
+        return results, certainty, LBL
 
 
 class AMoE(nn.Module):
@@ -167,6 +171,7 @@ class AMoE(nn.Module):
         sum_logit      = torch.zeros_like(state)            # [B, N, D] 누적 출력
 
         halting_probs = []  
+        total_LBL = 0.0
 
         for t in range(self.max_steps):
             # =====================================================================
@@ -191,13 +196,12 @@ class AMoE(nn.Module):
 
             # 3. 추출된 토큰이 있을 때만 MoE 연산 수행 (핵심 연산량 감소 구간)
             if active_tokens.numel() > 0:
-                new_active, cert_active = self._moe_call(active_tokens)
+                new_active, cert_active, LBL = self._moe_call(active_tokens)
+                total_LBL = total_LBL + LBL
                 
                 # 4. 연산된 결과를 원래 배치 위치로 복원 (Scatter)
-                # autocast(fp16/bf16)에서 MoE 출력 dtype이 new_flat/cert_flat(fp32)과
-                # 다를 수 있어 dst dtype에 맞춰 캐스팅 (누적은 fp32로 유지)
-                new_flat[active_mask] = new_active.to(new_flat.dtype)
-                cert_flat[active_mask] = cert_active.to(cert_flat.dtype)
+                new_flat[active_mask] = new_active
+                cert_flat[active_mask] = cert_active
 
             # 다시 3차원으로 복구
             new_state = new_flat.view(B, N, D)
@@ -224,7 +228,7 @@ class AMoE(nn.Module):
             halting_probs.append(step_cert.squeeze(-1))     
 
         halting_probs = torch.stack(halting_probs, dim=0)   # [T, B, N]
-        return sum_logit, halting_probs
+        return sum_logit, halting_probs, total_LBL
 
 
 class Attention(nn.Module):
@@ -298,12 +302,15 @@ class Transformer(nn.Module):
                 all_halting_probs (list)     레이어별 [T, B, N] 리스트 (길이=depth)
         """
         all_halting_probs = []
+        total_LBL = 0
+
         for atten, ff in self.layers:
             x = atten(x) + x                        # [B, N, D] attention residual
-            ff_out, hp = ff(x)                      # AMoE: ([B, N, D], [T, B, N])
+            ff_out, hp, LBL = ff(x)                 # AMoE: ([B, N, D], [T, B, N])
             x = ff_out + x                          # [B, N, D] AMoE residual
             all_halting_probs.append(hp)
-        return self.norm(x), all_halting_probs
+            total_LBL = total_LBL + LBL
+        return self.norm(x), all_halting_probs, total_LBL
 
 
 class LLM(nn.Module):
@@ -315,7 +322,7 @@ class LLM(nn.Module):
 
     def __init__(self, dim, depth, max_len, mlp_dim, heads, dim_head,
                  vocab_size, padding_idx, experts,
-                 base=10000, dropout=0., ponder_beta=0.01, lambda_p=0.2):
+                 base=10000, dropout=0., ponder_beta=0.01, lambda_p=0.2, alpha=0.01):
         """
         input : 모델 하이퍼파라미터들 + vocab_size, padding_idx,
                 ponder_beta(PonderNet 손실 가중), lambda_p(기하분포 prior 파라미터)
@@ -330,6 +337,7 @@ class LLM(nn.Module):
                                        dim_head, experts, base, dropout=dropout)
         self.dropout = nn.Dropout(p=dropout)
         self.mlp_head = nn.Linear(dim, vocab_size)              # [D] → [V]
+        self.alpha = alpha
 
     def _ponder_loss(self, all_halting_probs):
         """
@@ -360,7 +368,7 @@ class LLM(nn.Module):
         """
         x = self.embedding(input_ids)                          # [B, N, D]
         x = self.dropout(x)                                    # [B, N, D]
-        x, all_halting_probs = self.transformer(x)             # [B, N, D], list of [T, B, N]
+        x, all_halting_probs, LBL = self.transformer(x)        # [B, N, D], list of [T, B, N], scala
         logits = self.mlp_head(x)                              # [B, N, V]
 
         loss = None
@@ -373,7 +381,7 @@ class LLM(nn.Module):
                 ignore_index=-100,
             )
             ponder_loss = self._ponder_loss(all_halting_probs)
-            loss = task_loss + self.ponder_beta * ponder_loss
+            loss = task_loss + self.ponder_beta * ponder_loss + self.alpha*LBL
         return CausalLMOutput(loss=loss, logits=logits)
 
 
