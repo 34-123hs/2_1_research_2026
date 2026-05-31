@@ -46,6 +46,7 @@ from transformers import (
     TrainingArguments,
     DataCollatorForLanguageModeling,
 )
+from transformers.trainer_utils import get_last_checkpoint
 import wandb
 from model import LLM, TiktokenHFWrapper, MemmapDataset
 from optim import build_muon_optimizer
@@ -612,9 +613,9 @@ def run_training(args):
     print(f"[Budget] max_size={args.max_size:,} tokens → "
           f"max_steps={max_steps:,} (tokens/step={tokens_per_step:,})")
 
-    # 각 run을 고유 output_dir로 → 공유 볼륨에서 여러 agent가 같은 sweep_outputs에
-    # 체크포인트를 쓰며 충돌/덮어쓰기(save_total_limit 회전)하는 것을 방지.
-    if wandb.run is not None:
+    # sweep(--resume=0): run마다 고유 output_dir(<run_id>) → 동시 agent 충돌 방지.
+    # 메인 학습(--resume=1): 고정 output_dir 유지 → 박스가 죽었다 켜져도 마지막 체크포인트에서 재개.
+    if wandb.run is not None and not args.resume:
         args.output_dir = os.path.join(args.output_dir, wandb.run.id)
 
     targs = TrainingArguments(
@@ -630,6 +631,8 @@ def run_training(args):
         logging_steps=20,
         eval_strategy="steps",
         eval_steps=args.eval_interval,
+        save_strategy="steps",
+        save_steps=args.save_steps,
         save_total_limit=2,
         bf16=torch.cuda.is_available(),
         report_to="wandb",
@@ -665,7 +668,13 @@ def run_training(args):
         log_grad_detail=args.log_grad_detail,
         log_path=log_path,
     )
-    trainer.train()
+    # --resume: 고정 output_dir에 남은 마지막 체크포인트가 있으면 거기서 재개 (없으면 새로).
+    resume_ckpt = None
+    if args.resume and os.path.isdir(args.output_dir):
+        resume_ckpt = get_last_checkpoint(args.output_dir)
+        if resume_ckpt:
+            print(f"[Resume] {resume_ckpt} 에서 재개")
+    trainer.train(resume_from_checkpoint=resume_ckpt)
 
     eval_metrics = trainer.evaluate()
     ppl = math.exp(eval_metrics["eval_loss"]) if eval_metrics["eval_loss"] < 20 else float("inf")

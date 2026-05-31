@@ -57,6 +57,10 @@ def add_base_args(parser, output_dir_default):
                         help="1=AMoE MoE 호출에 gradient checkpointing 적용, 0=미적용")
     parser.add_argument("--compile", type=int, default=0,
                         help="1=torch.compile 적용 (HF Trainer torch_compile)")
+    parser.add_argument("--save_steps", type=int, default=1000,
+                        help="체크포인트 저장 간격(스텝)")
+    parser.add_argument("--resume", type=int, default=0,
+                        help="1=고정 output_dir의 마지막 체크포인트에서 재개 (메인 학습용)")
 
     # Muon / AdamW
     parser.add_argument("--lr", type=float, default=3e-4,
