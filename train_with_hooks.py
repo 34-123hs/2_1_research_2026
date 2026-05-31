@@ -188,14 +188,17 @@ def compute_aux_and_metrics(collector: HookCollector,
     per_layer_mean_step = []
     hp_list = collector.halting_probs
     if hp_list:
-        T = hp_list[0].size(0)
-        cert_matrix = np.zeros((len(hp_list), T), dtype=np.float32)
+        # 각 AMoE 레이어가 독립적으로 early-exit하므로 halting_probs의 T가 레이어마다
+        # 다를 수 있다(특히 eval). 레이어별 자기 T를 쓰고, cert_matrix는 최대 T로 패딩.
+        Tmax = max(hp.size(0) for hp in hp_list)
+        cert_matrix = np.zeros((len(hp_list), Tmax), dtype=np.float32)
         for li, hp in enumerate(hp_list):
-            t_idx = torch.arange(1, T + 1, device=hp.device, dtype=hp.dtype)
+            Ti = hp.size(0)
+            t_idx = torch.arange(1, Ti + 1, device=hp.device, dtype=hp.dtype)
             per_layer_mean_step.append(
-                float((hp * t_idx.view(T, 1, 1)).sum(dim=0).mean().detach())
+                float((hp * t_idx.view(Ti, 1, 1)).sum(dim=0).mean().detach())
             )
-            cert_matrix[li] = hp.mean(dim=(1, 2)).detach().float().cpu().numpy()
+            cert_matrix[li, :Ti] = hp.mean(dim=(1, 2)).detach().float().cpu().numpy()
         metrics["halting/mean_step_global"] = float(np.mean(per_layer_mean_step))
 
     if log_per_layer:
