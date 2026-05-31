@@ -23,6 +23,8 @@ wandb/
 # Training artifacts
 custom-llm-out/
 sweep_outputs/
+hooks_outputs/
+logs/
 
 # Model checkpoints
 *.pt

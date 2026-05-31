@@ -35,6 +35,7 @@ wandb:
 """
 
 import os
+import json
 import math
 import argparse
 import torch
@@ -81,42 +82,42 @@ def init_router_bias(model: LLM, mean: float, std: float):
 
 class HookCollector:
     """
-    Forward hooks per layer collect:
-      • gate_logits : output of MoE.gate (nn.Linear) — [S, E] with grad alive
-      • halting_probs : output[1] of AMoE — [T, B, N]
-
-    MoE is wrapped in gradient_checkpoint(use_reentrant=False), so its forward
-    is recomputed during backward — gate hook would fire again. A cap
-    (depth × max_steps) makes backward-time recaptures no-ops.
+    Per-layer forward hooks tag every capture with its AMoE layer index (and, for
+    the gate, the ponder-step index within that layer). compute_aux runs in
+    compute_loss BEFORE backward, so the gradient-checkpoint recompute that fires
+    these hooks again during backward only appends post-compute garbage (cleared
+    next step) and never pollutes the metrics.
+      • gate_logits   : list of (layer, step, [S, E]) — each MoE.gate call
+      • halting_probs : list of (layer, [T, B, N])    — each AMoE output[1]
     """
     def __init__(self):
-        self.gate_logits = []      # list of [S, E]
-        self.halting_probs = []    # list of [T, B, N]
-        self._gate_cap = 10**9
-        self._amoe_cap = 10**9
+        self.gate_logits = []      # [(layer, step, [S, E])]
+        self.halting_probs = []    # [(layer, [T, B, N])]
+        self._layer_step = {}      # layer -> next ponder-step index
 
     def clear(self):
         self.gate_logits.clear()
         self.halting_probs.clear()
+        self._layer_step = {}
 
-    def _gate_hook(self, module, inputs, output):
-        if len(self.gate_logits) < self._gate_cap:
-            self.gate_logits.append(output)
+    def _gate_hook(self, li):
+        def hook(module, inputs, output):
+            st = self._layer_step.get(li, 0)
+            self.gate_logits.append((li, st, output))
+            self._layer_step[li] = st + 1
+        return hook
 
-    def _amoe_hook(self, module, inputs, output):
-        if len(self.halting_probs) < self._amoe_cap:
+    def _amoe_hook(self, li):
+        def hook(module, inputs, output):
             _, hp = output
-            self.halting_probs.append(hp)
+            self.halting_probs.append((li, hp))
+        return hook
 
 
 def attach_hooks(model: LLM, collector: HookCollector):
-    depth = len(model.transformer.layers)
-    max_steps = model.transformer.layers[0][1].max_steps
-    collector._gate_cap = depth * max_steps
-    collector._amoe_cap = depth
-    for _atten, amoe in model.transformer.layers:
-        amoe.moe.gate.register_forward_hook(collector._gate_hook)
-        amoe.register_forward_hook(collector._amoe_hook)
+    for li, (_atten, amoe) in enumerate(model.transformer.layers):
+        amoe.moe.gate.register_forward_hook(collector._gate_hook(li))
+        amoe.register_forward_hook(collector._amoe_hook(li))
 
 
 # ============================================================
@@ -128,94 +129,91 @@ def compute_aux_and_metrics(collector: HookCollector,
                             log_per_layer: bool):
     """
     Returns:
-      balance_loss      : scalar tensor (grad alive) — Switch load-balance aux
-      metrics           : dict[str, float]            — wandb-loggable scalars
-      cert_matrix       : np.ndarray [depth, T] | None — mean step_cert per
-                          (layer, AMoE_step)
-      per_layer_table   : dict[str, list[float]]      — for console rendering
+      balance_loss   : scalar tensor (grad alive) — Switch load-balance aux
+      metrics        : dict[str, float]            — wandb scalars
+      cert_matrix    : [n_layer, Tmax] | None — mean step_cert per (layer, AMoE step)
+      dispatch_layer : [depth, E]  | None — expert dispatch fraction per layer
+      dispatch_step  : [maxstep, E]| None — expert dispatch fraction per ponder step
+                       (summed over layers; vertical-depth view)
+      per_layer_table: dict[str, list[float]]      — for console rendering
     """
     metrics = {}
     empty_table = {"balance": [], "max_pct": [], "ent_norm": [], "mean_step": []}
 
-    gate_logits = collector.gate_logits
-    n_gate = len(gate_logits)
-    metrics["debug/gate_capture_count"] = n_gate
-    metrics["debug/expected_gate_count"] = depth * collector._gate_cap // max(depth, 1)
+    gate = collector.gate_logits   # [(layer, step, [S, E])]
+    metrics["debug/gate_capture_count"] = len(gate)
+    if not gate:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        return torch.zeros((), device=device), metrics, None, None, None, empty_table
 
-    if n_gate == 0 or n_gate % depth != 0:
-        # 캡처가 비정상이면 안전한 fallback: balance=0, 전체 평균 statistic만
-        if n_gate == 0:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            return torch.zeros((), device=device), metrics, None, empty_table
+    E = gate[0][2].size(-1)
+    maxstep = 1 + max(st for _, st, _ in gate)
 
-        bal, mxs, ents = [], [], []
-        for gl in gate_logits:
-            b, mx, ent = switch_gate_stats(gl)
-            bal.append(b)
-            mxs.append(mx)
-            ents.append(ent)
-        balance_loss = torch.stack(bal).mean()
-        metrics["aux/balance_loss"] = float(balance_loss.detach())
-        metrics["router/max_pct_global"] = float(torch.stack(mxs).mean())
-        metrics["router/entropy_norm_global"] = float(torch.stack(ents).mean())
-        return balance_loss, metrics, None, empty_table
+    per_layer_bal = [[] for _ in range(depth)]   # grad-alive balance tensors
+    per_layer_max = [[] for _ in range(depth)]
+    per_layer_ent = [[] for _ in range(depth)]
+    layer_cnt = np.zeros((depth, E), dtype=np.float64)   # expert dispatch counts / layer
+    layer_tot = np.zeros(depth, dtype=np.float64)
+    step_cnt  = np.zeros((maxstep, E), dtype=np.float64)  # ...summed over layers / step
+    step_tot  = np.zeros(maxstep, dtype=np.float64)
 
-    # 정상 경로: depth × step_count_per_layer 모양으로 walk
-    spl = n_gate // depth  # steps per layer
-    per_layer_bal_t = []   # grad-alive scalar tensors
-    per_layer_max = []
-    per_layer_ent = []
-    idx = 0
-    for _li in range(depth):
-        bal_t, mx_t, ent_t = [], [], []
-        for _t in range(spl):
-            gl = gate_logits[idx]; idx += 1
-            b, mx, ent = switch_gate_stats(gl)
-            bal_t.append(b)
-            mx_t.append(mx)
-            ent_t.append(ent)
-        per_layer_bal_t.append(torch.stack(bal_t).mean())
-        per_layer_max.append(float(torch.stack(mx_t).mean()))
-        per_layer_ent.append(float(torch.stack(ent_t).mean()))
+    for li, st, gl in gate:
+        b, mx, ent = switch_gate_stats(gl)
+        per_layer_bal[li].append(b)
+        per_layer_max[li].append(float(mx))
+        per_layer_ent[li].append(float(ent))
+        sel = gl.float().argmax(dim=-1)
+        cnt = torch.bincount(sel, minlength=E).double().cpu().numpy()
+        n = gl.size(0)
+        layer_cnt[li] += cnt; layer_tot[li] += n
+        step_cnt[st]  += cnt; step_tot[st]  += n
 
+    # balance loss: per-layer mean → global mean (grad alive)
+    per_layer_bal_t = [torch.stack(b).mean() for b in per_layer_bal if b]
     balance_loss = torch.stack(per_layer_bal_t).mean()
     metrics["aux/balance_loss"] = float(balance_loss.detach())
-    metrics["router/max_pct_global"] = float(np.mean(per_layer_max))
-    metrics["router/entropy_norm_global"] = float(np.mean(per_layer_ent))
 
-    # halting: certainty matrix + mean_step
+    pl_bal = [float(torch.stack(b).mean().detach()) if b else float("nan") for b in per_layer_bal]
+    pl_max = [float(np.mean(m)) if m else float("nan") for m in per_layer_max]
+    pl_ent = [float(np.mean(e)) if e else float("nan") for e in per_layer_ent]
+    metrics["router/max_pct_global"] = float(np.nanmean(pl_max))
+    metrics["router/entropy_norm_global"] = float(np.nanmean(pl_ent))
+
+    # expert dispatch fraction: by layer [depth, E] and by ponder step [maxstep, E]
+    dispatch_layer = layer_cnt / np.maximum(layer_tot[:, None], 1.0)
+    dispatch_step  = step_cnt  / np.maximum(step_tot[:, None], 1.0)
+
+    # halting: certainty matrix + mean_step (per-layer T may differ → pad to max T)
     cert_matrix = None
     per_layer_mean_step = []
-    hp_list = collector.halting_probs
+    hp_list = collector.halting_probs   # [(layer, [T, B, N])]
     if hp_list:
-        # 각 AMoE 레이어가 독립적으로 early-exit하므로 halting_probs의 T가 레이어마다
-        # 다를 수 있다(특히 eval). 레이어별 자기 T를 쓰고, cert_matrix는 최대 T로 패딩.
-        Tmax = max(hp.size(0) for hp in hp_list)
+        Tmax = max(hp.size(0) for _, hp in hp_list)
         cert_matrix = np.zeros((len(hp_list), Tmax), dtype=np.float32)
-        for li, hp in enumerate(hp_list):
+        for row, (_li, hp) in enumerate(hp_list):
             Ti = hp.size(0)
             t_idx = torch.arange(1, Ti + 1, device=hp.device, dtype=hp.dtype)
             per_layer_mean_step.append(
                 float((hp * t_idx.view(Ti, 1, 1)).sum(dim=0).mean().detach())
             )
-            cert_matrix[li, :Ti] = hp.mean(dim=(1, 2)).detach().float().cpu().numpy()
+            cert_matrix[row, :Ti] = hp.mean(dim=(1, 2)).detach().float().cpu().numpy()
         metrics["halting/mean_step_global"] = float(np.mean(per_layer_mean_step))
 
     if log_per_layer:
         for li in range(depth):
-            metrics[f"aux/balance/L{li}"] = float(per_layer_bal_t[li].detach())
-            metrics[f"router/max_pct/L{li}"] = per_layer_max[li]
-            metrics[f"router/entropy_norm/L{li}"] = per_layer_ent[li]
-            if li < len(per_layer_mean_step):
-                metrics[f"halting/mean_step/L{li}"] = per_layer_mean_step[li]
+            metrics[f"aux/balance/L{li}"] = pl_bal[li]
+            metrics[f"router/max_pct/L{li}"] = pl_max[li]
+            metrics[f"router/entropy_norm/L{li}"] = pl_ent[li]
+        for li, ms in enumerate(per_layer_mean_step):
+            metrics[f"halting/mean_step/L{li}"] = ms
 
     per_layer_table = {
-        "balance": [float(b.detach()) for b in per_layer_bal_t],
-        "max_pct": per_layer_max,
-        "ent_norm": per_layer_ent,
+        "balance": pl_bal,
+        "max_pct": pl_max,
+        "ent_norm": pl_ent,
         "mean_step": per_layer_mean_step,
     }
-    return balance_loss, metrics, cert_matrix, per_layer_table
+    return balance_loss, metrics, cert_matrix, dispatch_layer, dispatch_step, per_layer_table
 
 
 # ============================================================
@@ -265,6 +263,39 @@ def _log_heatmap_image(step: int, cert_matrix, grad_norms=None):
     fig.tight_layout()
     wandb.log({"halting/cert_heatmap": wandb.Image(fig)}, step=step)
     plt.close(fig)
+
+
+def _log_dispatch_heatmaps(step: int, dispatch_layer, dispatch_step):
+    """Two W&B heatmaps: expert dispatch by layer, and by ponder step (layers summed)."""
+    global _MATPLOTLIB_INITED
+    if not _MATPLOTLIB_INITED:
+        import matplotlib
+        matplotlib.use("Agg")
+        _MATPLOTLIB_INITED = True
+    import matplotlib.pyplot as plt
+
+    for name, mat, ylabel in (
+        ("router/dispatch_by_layer", dispatch_layer, "Layer (depth)"),
+        ("router/dispatch_by_step", dispatch_step, "AMoE step (vertical depth)"),
+    ):
+        if mat is None:
+            continue
+        R, E = mat.shape
+        fig, ax = plt.subplots(figsize=(max(4, E * 0.7), max(3, R * 0.3)))
+        im = ax.imshow(mat, aspect="auto", cmap="magma", vmin=0, vmax=1)
+        ax.set_xlabel("Expert")
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(range(E))
+        ax.set_yticks(range(R))
+        ax.set_title(f"{name} @ step {step}")
+        for i in range(R):
+            for j in range(E):
+                ax.text(j, i, f"{mat[i, j]:.2f}", ha="center", va="center",
+                        color="w" if mat[i, j] < 0.5 else "k", fontsize=7)
+        fig.colorbar(im, ax=ax, label="dispatch fraction")
+        fig.tight_layout()
+        wandb.log({name: wandb.Image(fig)}, step=step)
+        plt.close(fig)
 
 
 # ============================================================
@@ -330,7 +361,8 @@ def print_console_report(step: int,
 class HookedTrainer(Trainer):
     def __init__(self, *args, collector: HookCollector, depth: int,
                  balance_beta: float, log_per_layer: bool,
-                 print_console: bool, log_grad_detail: bool = False, **kwargs):
+                 print_console: bool, log_grad_detail: bool = False,
+                 log_path: str = None, **kwargs):
         super().__init__(*args, **kwargs)
         # HF Trainer >=4.46 GA loss bug fix
         self.model_accepts_loss_kwargs = False
@@ -341,8 +373,11 @@ class HookedTrainer(Trainer):
         self._log_per_layer = log_per_layer
         self._print_console = print_console
         self._log_grad_detail = log_grad_detail
+        self._log_path = log_path
         self._last_aux_metrics = {}
         self._last_cert_matrix = None
+        self._last_dispatch_layer = None
+        self._last_dispatch_step = None
         self._last_per_layer = {}
         self._last_grad_norms = None  # list[float] len=depth
         self._last_grad_detail = None  # (qkv:list, experts:list[list])
@@ -393,7 +428,8 @@ class HookedTrainer(Trainer):
         outputs = model(**inputs)
         base_loss = outputs.loss  # task + ponder_beta * ponder_kl (모델 내부)
 
-        bal_loss, metrics, cert_matrix, per_layer_table = compute_aux_and_metrics(
+        (bal_loss, metrics, cert_matrix, dispatch_layer, dispatch_step,
+         per_layer_table) = compute_aux_and_metrics(
             self._collector,
             depth=self._depth,
             log_per_layer=self._log_per_layer,
@@ -405,6 +441,8 @@ class HookedTrainer(Trainer):
 
         self._last_aux_metrics = metrics
         self._last_cert_matrix = cert_matrix
+        self._last_dispatch_layer = dispatch_layer
+        self._last_dispatch_step = dispatch_step
         self._last_per_layer = per_layer_table
 
         return (total, outputs) if return_outputs else total
@@ -456,6 +494,34 @@ class HookedTrainer(Trainer):
                     _log_heatmap_image(step, self._last_cert_matrix, gn)
                 except Exception as e:
                     print(f"[wandb heatmap skip] {e}", flush=True)
+
+            # B: expert-dispatch heatmaps (by layer + by ponder step)
+            if wandb.run is not None:
+                try:
+                    _log_dispatch_heatmaps(step, self._last_dispatch_layer,
+                                           self._last_dispatch_step)
+                except Exception as e:
+                    print(f"[wandb dispatch heatmap skip] {e}", flush=True)
+
+            # raw hooked data -> logs/<sweep>_log.jsonl (one record per logging step)
+            if self._log_path is not None:
+                rec = {
+                    "step": int(step),
+                    "run_id": (wandb.run.id if wandb.run is not None else None),
+                    "metrics": self._last_aux_metrics,
+                    "grad_norms": gn,
+                    "dispatch_by_layer": (self._last_dispatch_layer.tolist()
+                                          if self._last_dispatch_layer is not None else None),
+                    "dispatch_by_step": (self._last_dispatch_step.tolist()
+                                         if self._last_dispatch_step is not None else None),
+                    "cert_matrix": (self._last_cert_matrix.tolist()
+                                    if self._last_cert_matrix is not None else None),
+                }
+                try:
+                    with open(self._log_path, "a") as f:
+                        f.write(json.dumps(rec) + "\n")
+                except Exception as e:
+                    print(f"[raw log skip] {e}", flush=True)
         return super().log(logs, *args, **kwargs)
 
 
@@ -565,6 +631,13 @@ def run_training(args):
 
     optimizer = build_muon_optimizer(model, args)
 
+    # raw hooked-data log file: logs/<sweep-or-run>_log.jsonl
+    tag = (wandb.run.sweep_id if (wandb.run is not None and wandb.run.sweep_id)
+           else (args.run_name or (wandb.run.id if wandb.run is not None else "run")))
+    os.makedirs("logs", exist_ok=True)
+    log_path = os.path.join("logs", f"{tag}_log.jsonl")
+    print(f"[Hooks] raw hooked-data log -> {log_path}")
+
     trainer = HookedTrainer(
         model=model,
         args=targs,
@@ -578,6 +651,7 @@ def run_training(args):
         log_per_layer=args.log_per_layer,
         print_console=args.print_console,
         log_grad_detail=args.log_grad_detail,
+        log_path=log_path,
     )
     trainer.train()
 
