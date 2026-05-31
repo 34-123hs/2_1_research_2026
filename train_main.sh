@@ -34,8 +34,11 @@ for f in train.bin val.bin; do
   [ -f "$f" ] || { echo "[error] $f 없음 — corpus를 이 디렉토리에 넣으세요" >&2; exit 1; }
 done
 
-# 4) 탐색 HP — placeholder (sweep 최적값 나오면 교체)
-LR=1e-3; MUON_LR=0.02; PONDER_BETA=0.01; ALPHA=0.01
+# 4) 탐색 HP — sweep에서 추출한 값
+LR=0.0018411529824275833
+MUON_LR=0.032273990315242855
+PONDER_BETA=0.013347211915238398
+ALPHA=0.005
 
 # 5) 메인 학습 (단일 프로세스, 풀 코퍼스). wandb는 기존과 동일 프로젝트로 로깅.
 "$PY" train_with_hooks.py \
