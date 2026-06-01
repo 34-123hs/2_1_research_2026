@@ -219,6 +219,13 @@
   .archbig{width:min(78%,820px);margin:0 auto;}
   .archbig .archlegend{justify-content:center;font-size:13px;gap:16px;}
 
+  /* 학습 결과: train / eval 좌우 */
+  .imgpair{display:grid;grid-template-columns:1fr 1fr;gap:26px;flex:1;min-height:0;}
+  .imgcell{display:flex;flex-direction:column;min-height:0;}
+  .imgcell .imglabel{font-family:var(--mono);font-size:14px;color:var(--accent-3);margin-bottom:9px;display:flex;align-items:center;gap:7px;}
+  .imgcell .imglabel::before{content:"$";color:var(--term-green);font-weight:700;}
+  .imgcell img{width:100%;flex:1;min-height:0;object-fit:contain;border:1px solid var(--card-brd);border-radius:12px;background:rgba(255,255,255,.92);padding:10px;}
+
   /* ===== PDF / 인쇄 ===== */
   @media print{
     @page{ size:297mm 167mm; margin:0; }
@@ -301,7 +308,7 @@
               토큰당 연산량 증가 없이 모델 용량을 확장하고, 입력 복잡도에 따라 연산 깊이를 동적으로 조절해 추론 FLOPs를 절감하는 상호보완적 효율성 체계.
             </p>
             <div style="margin-top:26px;display:flex;gap:10px;flex-wrap:wrap;">
-              <span class="badge">#MoE</span><span class="badge">#동적 연산 깊이</span><span class="badge">#PonderNet 대조군</span><span class="badge">#FineWeb 10B</span>
+              <span class="badge">#MoE</span><span class="badge">#동적 연산 깊이</span><span class="badge">#대조군 PonderNet·Vanilla</span><span class="badge">#FineWeb 10B</span>
             </div>
           </div>
         </div>
@@ -359,70 +366,34 @@
       <div class="slide-head"><div class="eyebrow">Ⅲ. 연구 방법 및 절차</div><h2>데이터 &amp; 학습 설정</h2></div>
       <div class="grid-2">
         <div class="card fragment fr"><h4 style="font-size:18px;color:var(--accent-3);margin-bottom:14px;">데이터셋</h4><ul class="bullets" style="margin-top:0;gap:10px;"><li>FineWeb 10B 서브셋 (sample-10BT)</li><li>tiktoken · r50k_base (5만 어휘)</li><li>train 20억 / val 4천만 토큰 (uint16)</li></ul></div>
-        <div class="card fragment fl"><h4 style="font-size:18px;color:var(--accent-3);margin-bottom:14px;">학습 설정</h4><ul class="bullets" style="margin-top:0;gap:10px;"><li>대조군 PonderNet · 실험군 2D-AMOE</li><li>동일 스윕 조건으로 통제</li><li>2D-AMOE: 균형 제어 인자 alpha 추가 탐색</li></ul></div>
+        <div class="card fragment fl"><h4 style="font-size:18px;color:var(--accent-3);margin-bottom:14px;">학습 설정</h4><ul class="bullets" style="margin-top:0;gap:10px;"><li>대조군 PonderNet · Vanilla LLM · 실험군 2D-AMOE</li><li>가능한 모든 인자는 동일 스윕 조건으로 통제</li><li>2D-AMOE: 균형 제어 인자 alpha 추가 탐색</li></ul></div>
       </div>
     </section>
 
-    <!-- 6. 결과 ① FLOPs -->
+    <!-- 7. 학습 결과 · Vanilla LLM -->
+    <section class="slide" data-out="up">
+      <div class="slide-head"><div class="eyebrow">학습 결과 · 대조군</div><h2>Vanilla LLM</h2></div>
+      <div class="imgpair">
+        <div class="imgcell fragment fr"><div class="imglabel">train</div><img src="images/Vanilla_train.png" alt="Vanilla LLM 학습 곡선"></div>
+        <div class="imgcell fragment fl"><div class="imglabel">eval</div><img src="images/Vanilla_eval.png" alt="Vanilla LLM 검증 곡선"></div>
+      </div>
+    </section>
+
+    <!-- 8. 학습 결과 · PonderNet -->
     <section class="slide" data-out="right">
-      <div class="slide-head"><div class="eyebrow">Ⅳ. 연구 결과 ① 연산량(FLOPs) · 대조군 PonderNet</div><h2>행렬 곱셈이 <span class="grad-text">연산의 90%</span></h2></div>
-      <div class="grid-2">
-        <div class="chart-wrap" style="height:100%;"><canvas id="chartFlops"></canvas></div>
-        <div style="display:flex;flex-direction:column;justify-content:center;gap:24px;">
-          <div class="fragment fl"><div class="bignum"><span class="grad-text">220.27</span></div><div class="stat-label">Total TFLOPs · 100k 토큰</div></div>
-          <div class="fragment fl"><div class="bignum"><span class="grad-text">2.203</span></div><div class="stat-label">GFLOPs / token</div></div>
-        </div>
+      <div class="slide-head"><div class="eyebrow">학습 결과 · 대조군</div><h2>PonderNet</h2></div>
+      <div class="imgpair">
+        <div class="imgcell fragment fr"><div class="imglabel">train</div><img src="images/Ponder_train.png" alt="PonderNet 학습 곡선"></div>
+        <div class="imgcell fragment fl"><div class="imglabel">eval</div><img src="images/Ponder_eval.png" alt="PonderNet 검증 곡선"></div>
       </div>
     </section>
 
-    <!-- 7. 결과 ② 추론 속도 -->
+    <!-- 9. 학습 결과 · 2D-AMoE -->
     <section class="slide" data-out="up">
-      <div class="slide-head"><div class="eyebrow">Ⅳ. 연구 결과 ② 추론 속도 · 대조군 PonderNet</div><h2>BF16 + Compile로 <span class="grad-text">약 2.05× 향상</span></h2></div>
-      <div class="slide-body"><div class="chart-box"><div class="chart-wrap"><canvas id="chartSpeed"></canvas></div></div></div>
-    </section>
-
-    <!-- 8. 결과 ③ 컴파일 오버헤드 -->
-    <section class="slide" data-out="right">
-      <div class="slide-head"><div class="eyebrow">Ⅳ. 연구 결과 ③ 컴파일 오버헤드 · 대조군 PonderNet</div><h2>1회성 비용 vs 추론 이득</h2></div>
-      <div class="grid-2">
-        <div class="chart-wrap" style="height:100%;"><canvas id="chartOverhead"></canvas></div>
-        <div style="display:flex;flex-direction:column;justify-content:center;gap:22px;">
-          <div class="fragment fl"><div class="bignum"><span class="grad-text">~46.8s</span></div><div class="stat-label">순수 컴파일 오버헤드</div></div>
-          <p class="lead fragment fl" style="margin-top:0;">단발성 추론엔 부담이나, 장시간 처리에선 속도 이득이 상쇄.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- 9. 고찰 -->
-    <section class="slide" data-out="up">
-      <div class="slide-head"><div class="eyebrow">Ⅴ. 고찰</div><h2>무엇을 확인했나</h2></div>
-      <div class="slide-body" style="justify-content:center;">
-        <ul class="bullets" style="font-size:clamp(17px,1.7vw,21px);">
-          <li class="fragment fu">대조군에서 반복 연산(addmm·mm)이 핵심 병목으로 확인</li>
-          <li class="fragment fu">→ 동적 깊이 절감(2D-AMOE)의 효용 가능성 시사</li>
-          <li class="fragment fu">BF16·컴파일 최적화만으로도 GPU 활용률 2배 개선</li>
-        </ul>
-      </div>
-    </section>
-
-    <!-- 10. 결론 -->
-    <section class="slide" data-out="up">
-      <div class="slide-head"><div class="eyebrow">Ⅵ. 결론</div><h2>맺음말</h2></div>
-      <div class="slide-body" style="justify-content:center;">
-        <ul class="bullets" style="font-size:clamp(17px,1.7vw,21px);">
-          <li class="fragment fu">수평·수직 효율화의 상호보완적 결합 가능성 제시</li>
-          <li class="fragment fu">연산량 증가 없는 용량 확장 + 동적 깊이 절감</li>
-          <li class="fragment fu">향후: alpha 최적화 및 대규모 검증으로 일반화 확장</li>
-        </ul>
-      </div>
-    </section>
-
-    <!-- 11. 마무리 -->
-    <section class="slide" data-out="up">
-      <div class="slide-body" style="justify-content:center;">
-        <div class="eyebrow">Thank you</div>
-        <h1>감사합니다 <span class="grad-text">.</span></h1>
-        <p class="lead">질문을 환영합니다.</p>
+      <div class="slide-head"><div class="eyebrow">학습 결과 · 실험군</div><h2><span class="grad-text">2D-AMoE</span></h2></div>
+      <div class="imgpair">
+        <div class="imgcell fragment fr"><div class="imglabel">train</div><img src="images/AMOE_train.png" alt="2D-AMoE 학습 곡선"></div>
+        <div class="imgcell fragment fl"><div class="imglabel">eval</div><img src="images/AMOE_eval.png" alt="2D-AMoE 검증 곡선"></div>
       </div>
     </section>
 
@@ -646,37 +617,11 @@ function tick(){
 }
 tick();
 
-/* ================= Chart.js (논문 실측 데이터) ================= */
+/* ================= Chart.js (차트 슬라이드 삭제됨) ================= */
 Chart.defaults.color='#9aa6d6';
 Chart.defaults.font.family="'JetBrains Mono','Nanum Gothic Coding',sans-serif";
 Chart.defaults.borderColor='rgba(255,255,255,.08)';
 const charts=[];
-
-charts.push(new Chart(document.getElementById('chartFlops'),{
-  type:'doughnut',
-  data:{labels:['addmm (FFNN·LM Head) 74.3%','mm 15.4%','sdpa / Attention 10.3%'],datasets:[
-    {data:[74.3,15.4,10.3],backgroundColor:['#5b8cff','#9b5cff','#22d3ee'],borderColor:'rgba(8,11,28,.6)',borderWidth:3}]},
-  options:{maintainAspectRatio:false,responsive:true,cutout:'60%',
-    plugins:{legend:{position:'bottom',labels:{boxWidth:14,padding:14}},tooltip:{callbacks:{label:c=>` ${c.parsed}%`}}}}
-}));
-
-charts.push(new Chart(document.getElementById('chartSpeed'),{
-  type:'bar',
-  data:{labels:['처리량 (k tok/s)','GPU 활용률 (TFLOP/s)'],datasets:[
-    {label:'FP32 + Eager',data:[12.8,28.2],backgroundColor:'#3a4170',borderRadius:8},
-    {label:'BF16 + Compile',data:[26.3,57.8],backgroundColor:'#5b8cff',borderRadius:8}]},
-  options:{maintainAspectRatio:false,responsive:true,plugins:{legend:{position:'top'}},
-    scales:{y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.06)'}},x:{grid:{display:false}}}}
-}));
-
-charts.push(new Chart(document.getElementById('chartOverhead'),{
-  type:'bar',
-  data:{labels:['순수 추론 (100k)','컴파일 오버헤드','Warmup 1st Pass'],datasets:[
-    {data:[3.81,46.8,50.6],backgroundColor:['#22d3ee','#9b5cff','#5b8cff'],borderRadius:8}]},
-  options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,
-    plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.parsed.x} s`}}},
-    scales:{x:{beginAtZero:true,grid:{color:'rgba(255,255,255,.06)'},title:{display:true,text:'초 (s)'}},y:{grid:{display:false}}}}
-}));
 
 /* ================= 테마 (다크 / 라이트) ================= */
 const themeBtn=document.getElementById('theme');
