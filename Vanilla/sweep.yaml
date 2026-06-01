@@ -1,0 +1,53 @@
+# sweep.yaml — wandb sweep 정의 (multi-GPU DDP)
+# 등록: wandb sweep --project <my-project> sweep.yaml
+# 실행: wandb agent <entity>/<my-project>/<id>
+#
+# DDP는 이 파일의 nproc_per_node 값으로 결정됩니다.
+# 단일 GPU sweep을 원하면 nproc_per_node=1 로 바꾸거나 command 블록을 통째로 제거하세요.
+
+program: train.py
+
+method: bayes
+metric:
+  name: eval/loss
+  goal: minimize
+
+early_terminate:
+  type: hyperband
+  min_iter: 10
+  eta: 3
+
+parameters:
+  max_size:
+    value: 50000000
+  max_val_size:
+    value: 200000
+  train_bin_path:
+    value: train.bin
+  val_bin_path:
+    value: val.bin
+  output_dir:
+    value: sweep_outputs
+  epochs:
+    value: 1
+  eval_interval:
+    value: 50
+  block_size:
+    value: 768
+
+  lr:
+    distribution: log_uniform_values
+    min: 1.0e-5
+    max: 5.0e-3
+  dropout:
+    values: [0.0, 0.025, 0.05]
+  batch_size:
+    values: [8, 12, 16]
+  grad_accum:
+    values: [2, 4, 6, 8]
+  depth:
+    values: [12]
+  dim:
+    values: [768]
+  warmup_steps:
+    values: [100, 150, 200]

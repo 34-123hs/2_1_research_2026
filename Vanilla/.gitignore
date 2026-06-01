@@ -1,0 +1,34 @@
+# 학습 데이터
+*.bin
+
+# 체크포인트 / 학습 출력
+custom-llm-out/
+sweep_outputs/
+*.safetensors
+pytorch_model.bin
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# 환경 / 시크릿
+.env
+wandb/
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 에디터
+.vscode/
+.idea/
+
+# hook 모니터링 출력/로그
+hooks_outputs/
+*.log
