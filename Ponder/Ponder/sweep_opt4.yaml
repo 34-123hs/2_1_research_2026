@@ -1,0 +1,49 @@
+# sweep_opt4.yaml — PonderNet baseline, 4-param optimization sweep
+# fixed: architecture + schedule (from the chosen config); swept: lr, muon_lr, lambda_p, ponder_beta
+# 등록: wandb sweep --project PounderNet sweep_opt4.yaml
+# 실행: wandb agent <entity>/PounderNet/<id>
+
+program: train_pondernet.py
+
+method: bayes
+metric:
+  name: eval/loss
+  goal: minimize
+
+parameters:
+  # ---- fixed (그대로) ----
+  batch_size:     {value: 24}
+  block_size:     {value: 768}
+  core_depth:     {value: 12}
+  dim:            {value: 768}
+  dim_head:       {value: 64}
+  dropout:        {value: 0}
+  epochs:         {value: 1}
+  eval_interval:  {value: 200}
+  grad_accum:     {value: 2}
+  heads:          {value: 12}
+  max_size:       {value: 50000000}
+  max_val_size:   {value: 200000}
+  mlp_dim:        {value: 3072}
+  output_dir:     {value: sweep_outputs}
+  ponder_steps:   {value: 8}
+  project:        {value: PounderNet}
+  train_bin_path: {value: train.bin}
+  val_bin_path:   {value: val.bin}
+  warmup_steps:   {value: 150}
+
+  # ---- swept (4) ----
+  lr:
+    distribution: log_uniform_values
+    min: 1.0e-4
+    max: 5.0e-3
+  muon_lr:
+    distribution: log_uniform_values
+    min: 5.0e-3
+    max: 5.0e-2
+  lambda_p:
+    values: [0.1, 0.2, 0.3, 0.5]
+  ponder_beta:
+    distribution: log_uniform_values
+    min: 1.0e-3
+    max: 1.0e-1

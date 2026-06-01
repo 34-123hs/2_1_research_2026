@@ -1,0 +1,59 @@
+# wandb sweep for the PonderNet baseline.
+#   wandb sweep --project custom-llm sweep.yaml
+#   wandb agent <entity>/custom-llm/<sweep-id>
+# Architecture / data / compute are FIXED (fair comparison); only optimization +
+# PonderNet-regularization HPs are swept, on a small proxy token budget per trial.
+program: train_pondernet.py
+# agent must use the conda python (bare `python` has no torch)
+command:
+  - ${env}
+  - /opt/conda/bin/python
+  - ${program}
+  - ${args}
+method: bayes
+metric:
+  name: eval/loss
+  goal: minimize
+
+parameters:
+  # --- fixed ---
+  project:        {value: PounderNet}
+  train_bin_path: {value: train.bin}
+  val_bin_path:   {value: val.bin}
+  output_dir:     {value: sweep_outputs}
+  dim:            {value: 768}
+  core_depth:     {value: 12}
+  ponder_steps:   {value: 8}
+  heads:          {value: 12}
+  dim_head:       {value: 64}
+  mlp_dim:        {value: 3072}
+  block_size:     {value: 768}
+  batch_size:     {value: 8}
+  grad_accum:     {value: 6}
+  dropout:        {value: 0}
+  warmup_steps:   {value: 150}
+  eval_interval:  {value: 200}
+  epochs:         {value: 1}
+  max_val_size:   {value: 200000}
+  # proxy budget per trial (~50M tokens ≈ 20-25 min on H100; raise for more signal)
+  max_size:       {value: 50000000}
+
+  # --- swept (keep compile on / checkpoint off via train_pondernet defaults) ---
+  lr:
+    distribution: log_uniform_values
+    min: 0.0001
+    max: 0.005
+  muon_lr:
+    distribution: log_uniform_values
+    min: 0.005
+    max: 0.05
+  lambda_p:
+    values: [0.1, 0.2, 0.3, 0.5]
+  ponder_beta:
+    distribution: log_uniform_values
+    min: 0.001
+    max: 0.1
+
+early_terminate:
+  type: hyperband
+  min_iter: 3

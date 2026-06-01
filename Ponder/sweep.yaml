@@ -1,0 +1,50 @@
+# sweep.yaml — wandb sweep 정의 (단일 GPU)
+# 등록: wandb sweep --project <my-project> sweep.yaml
+# 실행: wandb agent <entity>/<my-project>/<id>
+
+program: train_with_hooks.py
+
+method: bayes
+metric:
+  name: eval/loss
+  goal: minimize
+
+early_terminate:
+  type: hyperband
+  min_iter: 10
+  eta: 3
+
+parameters:
+  max_size:
+    value: 50000000
+  max_val_size:
+    value: 200000
+  train_bin_path:
+    value: train.bin
+  val_bin_path:
+    value: val.bin
+  output_dir:
+    value: sweep_outputs
+  epochs:
+    value: 1
+  eval_interval:
+    value: 50
+  block_size:
+    value: 768
+
+  lr:
+    distribution: log_uniform_values
+    min: 1.0e-5
+    max: 1.0e-3
+  dropout:
+    values: [0.0, 0.025, 0.05]
+  batch_size:
+    values: [8, 12, 16]
+  grad_accum:
+    values: [2, 4, 6, 8]
+  depth:
+    values: [12, 16, 20]
+  dim:
+    values: [384, 512, 768]
+  warmup_steps:
+    values: [100, 150, 200]
