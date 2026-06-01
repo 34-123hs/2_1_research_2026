@@ -226,6 +226,18 @@
   .imgcell .imglabel::before{content:"$";color:var(--term-green);font-weight:700;}
   .imgcell img{width:100%;flex:1;min-height:0;object-fit:contain;border:1px solid var(--card-brd);border-radius:12px;background:rgba(255,255,255,.92);padding:10px;}
 
+  /* 클릭 스테퍼 (프레임 전환 모션 없음) */
+  .stepwrap{flex:1;min-height:0;display:flex;flex-direction:column;}
+  .steplabel{font-family:var(--mono);font-size:15px;color:var(--accent-3);margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+  .steplabel::before{content:"$";color:var(--term-green);font-weight:700;}
+  .stepper{position:relative;flex:1;min-height:0;}
+  .stepper img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;
+    border:1px solid var(--card-brd);border-radius:12px;background:rgba(255,255,255,.92);padding:10px;}
+  .stepper img.on{opacity:1;}   /* 전환 애니메이션 없음 */
+  .stepdots{display:flex;gap:8px;justify-content:center;margin-top:12px;}
+  .stepdots i{width:8px;height:8px;border-radius:50%;background:var(--card-brd);transition:.2s;}
+  .stepdots i.on{background:var(--accent);box-shadow:0 0 8px rgba(91,140,255,.8);transform:scale(1.2);}
+
   /* ===== PDF / 인쇄 ===== */
   @media print{
     @page{ size:297mm 167mm; margin:0; }
@@ -397,6 +409,57 @@
       </div>
     </section>
 
+    <!-- 10. Halting Certainty 스테퍼 (클릭 시 다음 step) -->
+    <section class="slide" data-out="up">
+      <div class="slide-head"><div class="eyebrow">학습 결과 · 2D-AMoE</div><h2>Halting Certainty <span class="grad-text">추이</span></h2></div>
+      <div class="stepwrap fragment fu">
+        <div class="steplabel">halting cert heatmap · training step <span class="stepnum">0</span></div>
+        <div class="stepper">
+          <img class="on" data-step="0"      src="images/AMOE_vertex/media_images_halting_cert_heatmap_0_0b7f67035d6d4413600f.png" alt="halting certainty heatmap · step 0">
+          <img            data-step="9,981"  src="images/AMOE_vertex/media_images_halting_cert_heatmap_9981_02f732dd2de482ae76b9.png" alt="halting certainty heatmap · step 9981">
+          <img            data-step="20,002" src="images/AMOE_vertex/media_images_halting_cert_heatmap_20002_2dcdacbede12503425ef.png" alt="halting certainty heatmap · step 20002">
+          <img            data-step="29,981" src="images/AMOE_vertex/media_images_halting_cert_heatmap_29981_5c675914cbe91c9686f9.png" alt="halting certainty heatmap · step 29981">
+          <img            data-step="39,961" src="images/AMOE_vertex/media_images_halting_cert_heatmap_39961_edcf3e96cbe9c485a086.png" alt="halting certainty heatmap · step 39961">
+          <img            data-step="54,241" src="images/AMOE_vertex/media_images_halting_cert_heatmap_54241_90e7f9482a31b2b2a637.png" alt="halting certainty heatmap · step 54241">
+        </div>
+        <div class="stepdots"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </section>
+
+    <!-- 11. Router Dispatch by step 스테퍼 -->
+    <section class="slide" data-out="right">
+      <div class="slide-head"><div class="eyebrow">학습 결과 · 2D-AMoE</div><h2>Router Dispatch <span class="grad-text">· by step</span></h2></div>
+      <div class="stepwrap fragment fu">
+        <div class="steplabel">router dispatch by step · training step <span class="stepnum">20</span></div>
+        <div class="stepper">
+          <img class="on" data-step="20"     src="images/AMOE_vertex/media_images_router_dispatch_by_step_20_550ec2ceec1daa41748a.png" alt="router dispatch by step · 20">
+          <img            data-step="10,000" src="images/AMOE_vertex/media_images_router_dispatch_by_step_10000_887e300d437dc9bf200e.png" alt="router dispatch by step · 10000">
+          <img            data-step="20,020" src="images/AMOE_vertex/media_images_router_dispatch_by_step_20020_d1fd2f9213d1fd29c317.png" alt="router dispatch by step · 20020">
+          <img            data-step="30,000" src="images/AMOE_vertex/media_images_router_dispatch_by_step_30000_55b4e8908b19ffb8ba29.png" alt="router dispatch by step · 30000">
+          <img            data-step="39,980" src="images/AMOE_vertex/media_images_router_dispatch_by_step_39980_3778c827bdfe06095bb8.png" alt="router dispatch by step · 39980">
+          <img            data-step="54,254" src="images/AMOE_vertex/media_images_router_dispatch_by_step_54254_7b50b3a9f8efa998f5d1.png" alt="router dispatch by step · 54254">
+        </div>
+        <div class="stepdots"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </section>
+
+    <!-- 12. Router Dispatch by layer 스테퍼 -->
+    <section class="slide" data-out="up">
+      <div class="slide-head"><div class="eyebrow">학습 결과 · 2D-AMoE</div><h2>Router Dispatch <span class="grad-text">· by layer</span></h2></div>
+      <div class="stepwrap fragment fu">
+        <div class="steplabel">router dispatch by layer · training step <span class="stepnum">20</span></div>
+        <div class="stepper">
+          <img class="on" data-step="20"     src="images/AMOE_vertex/media_images_router_dispatch_by_layer_20_185a580b3125518afbeb.png" alt="router dispatch by layer · 20">
+          <img            data-step="10,000" src="images/AMOE_vertex/media_images_router_dispatch_by_layer_10000_ea935a908ff71360665e.png" alt="router dispatch by layer · 10000">
+          <img            data-step="20,020" src="images/AMOE_vertex/media_images_router_dispatch_by_layer_20020_51bf5e69b90a03b32f16.png" alt="router dispatch by layer · 20020">
+          <img            data-step="30,000" src="images/AMOE_vertex/media_images_router_dispatch_by_layer_30000_a56407b91219782fa331.png" alt="router dispatch by layer · 30000">
+          <img            data-step="39,980" src="images/AMOE_vertex/media_images_router_dispatch_by_layer_39980_d9f7c47b627a1f2b75ce.png" alt="router dispatch by layer · 39980">
+          <img            data-step="54,254" src="images/AMOE_vertex/media_images_router_dispatch_by_layer_54254_5776c08f983bea41ceff.png" alt="router dispatch by layer · 54254">
+        </div>
+        <div class="stepdots"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </section>
+
   </main>
 
   <!-- 2~4페이지 우측 다이어그램 (복제용) -->
@@ -537,12 +600,26 @@ function goTo(n,revealAll=false){
   idx=n; update();
   setTimeout(()=>animating=false,720);
 }
+// 이미지 스테퍼: dir(+1/-1)만큼 프레임 이동, 범위 벗어나면 false(슬라이드 전환에 위임)
+function stepperStep(slide,dir){
+  const st=slide.querySelector('.stepper'); if(!st) return false;
+  const imgs=[...st.querySelectorAll('img')];
+  const cur=imgs.findIndex(im=>im.classList.contains('on'));
+  const nx=cur+dir;
+  if(nx<0||nx>=imgs.length) return false;
+  imgs[cur].classList.remove('on'); imgs[nx].classList.add('on');
+  const num=slide.querySelector('.stepnum'); if(num) num.textContent=imgs[nx].dataset.step||'';
+  [...slide.querySelectorAll('.stepdots i')].forEach((d,i)=>d.classList.toggle('on',i===nx));
+  return true;
+}
 function next(){
   const hidden = frags(idx).find(el=>!el.classList.contains('revealed'));
   if(hidden){ hidden.classList.add('revealed'); return; }
+  if(stepperStep(slides[idx],1)) return;   // 다음 heatmap (모션 없음)
   goTo(idx+1);
 }
 function prev(){
+  if(stepperStep(slides[idx],-1)) return;  // 이전 heatmap
   const shown = frags(idx).reverse().find(el=>el.classList.contains('revealed'));
   if(shown){ shown.classList.remove('revealed'); return; }
   goTo(idx-1);
