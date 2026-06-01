@@ -685,6 +685,12 @@ window.addEventListener('beforeprint',()=>{ slides.forEach((_,i)=>setFrags(i,tru
 window.addEventListener('afterprint',()=>{ charts.forEach(c=>c.resize()); });
 document.getElementById('export').addEventListener('click',exportPDF);
 
+/* 화면 좌/우 클릭으로 이동 (UI 요소 클릭은 제외) */
+window.addEventListener('click',e=>{
+  if(e.target.closest('button,a,.dot,#theme,#export')) return;
+  (e.clientX < innerWidth/2) ? prev() : next();
+});
+
 /* 휠 / 터치 */
 let wlock=false;
 window.addEventListener('wheel',e=>{ if(wlock)return; wlock=true; setTimeout(()=>wlock=false,700); e.deltaY>0?next():prev(); },{passive:true});
