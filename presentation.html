@@ -171,6 +171,47 @@
   body.light #export,body.light #theme{background:rgba(30,50,100,.05);color:#16203a;}
   body.light #export:hover,body.light #theme:hover{background:rgba(37,99,235,.14);border-color:#2563eb;}
 
+  /* ===== 2~4페이지: 좌(내용)/우(다이어그램) 2단 ===== */
+  .split{flex:1;min-height:0;display:block;}
+  .split>:first-child{width:52%;height:100%;}
+  /* 다이어그램: 슬라이드 기준 절대 위치·크기 고정 (2·3·4 동일) */
+  .archslot{position:absolute;top:50%;right:44px;transform:translateY(-50%);width:min(46%,480px);z-index:2;}
+  .archfig{width:100%;
+    --d-blue-fill:#0C447C;--d-blue-stroke:#85B7EB;--d-blue-text:#B5D4F4;
+    --d-amber-fill:#633806;--d-amber-stroke:#EF9F27;--d-amber-text:#FAC775;
+    --d-coral-fill:#712B13;--d-coral-stroke:#F0997B;--d-coral-text:#F5C4B3;
+    --d-route:#EF9F27;--d-arrow:#9c9a92;}
+  body.light .archfig{
+    --d-blue-fill:#E6F1FB;--d-blue-stroke:#378ADD;--d-blue-text:#0C447C;
+    --d-amber-fill:#FAEEDA;--d-amber-stroke:#BA7517;--d-amber-text:#854F0B;
+    --d-coral-fill:#FAECE7;--d-coral-stroke:#D85A30;--d-coral-text:#712B13;
+    --d-route:#BA7517;--d-arrow:#8a897f;}
+  .archfig .archcard{background:var(--card);border:1px solid var(--card-brd);border-radius:14px;padding:14px 14px 8px;}
+  .archfig .acap{font-size:12px;color:var(--ink-dim);margin:2px 2px 10px;line-height:1.45;}
+  .archfig .acap b{color:var(--ink);font-weight:700;}
+  .archfig svg{width:100%;height:auto;display:block;}
+  .archfig .box-blue{fill:var(--d-blue-fill);stroke:var(--d-blue-stroke);}
+  .archfig .box-amber{fill:var(--d-amber-fill);stroke:var(--d-amber-stroke);}
+  .archfig .box-coral{fill:var(--d-coral-fill);stroke:var(--d-coral-stroke);}
+  .archfig .t-blue{fill:var(--d-blue-text);}
+  .archfig .t-amber{fill:var(--d-amber-text);}
+  .archfig .t-coral{fill:var(--d-coral-text);}
+  .archfig .t-muted{fill:var(--ink-dim);}
+  .archfig .t-fg{fill:var(--ink);}
+  .archfig .th{font-family:var(--font);font-size:14px;font-weight:600;}
+  .archfig .ts{font-family:var(--font);font-size:12px;}
+  .archfig .arr{stroke:var(--d-arrow);stroke-width:1.5;fill:none;}
+  .archfig .route{stroke:var(--d-route);stroke-width:2;fill:none;}
+  .archfig .archlegend{display:flex;flex-wrap:wrap;gap:10px;margin:10px 2px 2px;font-size:10.5px;color:var(--ink-dim);}
+  .archfig .archlegend span{display:inline-flex;align-items:center;gap:6px;}
+  .archfig .archlegend i{width:11px;height:11px;border-radius:3px;border:1px solid;}
+  .archfig .archlegend .lg-blue{background:var(--d-blue-fill);border-color:var(--d-blue-stroke);}
+  .archfig .archlegend .lg-amber{background:var(--d-amber-fill);border-color:var(--d-amber-stroke);}
+  .archfig .archlegend .lg-coral{background:var(--d-coral-fill);border-color:var(--d-coral-stroke);}
+  .archfig .archlegend .lg-route{background:var(--d-route);border:none;width:16px;height:3px;border-radius:2px;}
+  /* 4페이지(dense): 좌측 내용은 2×2 카드로 */
+  .slide.dense .split .cards4{grid-template-columns:1fr 1fr;}
+
   /* ===== PDF / 인쇄 ===== */
   @media print{
     @page{ size:297mm 167mm; margin:0; }
@@ -243,35 +284,39 @@
 
     <!-- 2. 초록 -->
     <section class="slide" data-out="right">
-      <div class="slide-body" style="justify-content:center;">
-        <h2 class="fragment fu" style="font-weight:700;line-height:1.35;font-size:clamp(22px,2.6vw,34px);">
-          FFNN의 <span class="grad-text">수평적 효율화</span>와<br/><span class="grad-text">수직적 효율화</span>를 한번에
-        </h2>
-        <p class="lead fragment fu" style="margin-top:22px;">
-          토큰당 연산량 증가 없이 모델 용량을 확장하고, 입력 복잡도에 따라 연산 깊이를 동적으로 조절해 추론 FLOPs를 절감하는 상호보완적 효율성 체계.
-        </p>
-        <div class="fragment fu" style="margin-top:26px;display:flex;gap:10px;flex-wrap:wrap;">
-          <span class="badge">#MoE</span><span class="badge">#동적 연산 깊이</span><span class="badge">#PonderNet 대조군</span><span class="badge">#FineWeb 10B</span>
+      <div class="split">
+        <div class="slide-body" style="justify-content:center;">
+          <h2 class="fragment fu" style="font-weight:700;line-height:1.35;font-size:clamp(22px,2.6vw,34px);">
+            FFNN의 <span class="grad-text">수평적 효율화</span>와<br/><span class="grad-text">수직적 효율화</span>를 한번에
+          </h2>
+          <p class="lead fragment fu" style="margin-top:22px;">
+            토큰당 연산량 증가 없이 모델 용량을 확장하고, 입력 복잡도에 따라 연산 깊이를 동적으로 조절해 추론 FLOPs를 절감하는 상호보완적 효율성 체계.
+          </p>
+          <div class="fragment fu" style="margin-top:26px;display:flex;gap:10px;flex-wrap:wrap;">
+            <span class="badge">#MoE</span><span class="badge">#동적 연산 깊이</span><span class="badge">#PonderNet 대조군</span><span class="badge">#FineWeb 10B</span>
+          </div>
         </div>
+        <div class="archslot"></div>
       </div>
     </section>
 
     <!-- 3. 서론 -->
     <section class="slide" data-out="up">
       <div class="slide-head"><div class="eyebrow">Ⅰ. 서론</div><h2>두 개의 축, <span class="grad-text">하나의 구조</span></h2></div>
-      <div class="slide-body" style="justify-content:center;">
-        <div style="display:flex;gap:18px;align-items:stretch;">
-          <div class="card axis-card fragment fr"><div class="ico">↔️</div><h4 style="font-size:19px;margin-bottom:8px;">수평적 축</h4><p style="color:var(--ink-dim);font-size:15px;">병렬 전문가(MoE)<br/>파라미터 확장</p></div>
-          <div class="plus fragment fu">＋</div>
-          <div class="card axis-card fragment fl"><div class="ico">↕️</div><h4 style="font-size:19px;margin-bottom:8px;">수직적 축</h4><p style="color:var(--ink-dim);font-size:15px;">동적 연산 깊이<br/>FLOPs 절감</p></div>
-          <div class="plus fragment fu">→</div>
-          <div class="card axis-card fragment zoom" style="border-color:rgba(91,140,255,.5);background:rgba(91,140,255,.12);"><div class="ico">🧠</div><h4 style="font-size:19px;margin-bottom:8px;"><span class="grad-text">2D-AMOE</span></h4><p style="color:var(--ink-dim);font-size:15px;">시너지 극대화<br/>효율적 추론</p></div>
+      <div class="split">
+        <div style="display:flex;flex-direction:column;justify-content:center;gap:14px;">
+          <div class="card fragment fr" style="padding:16px 18px;"><div style="font-size:17px;font-weight:700;margin-bottom:4px;">↔️ 수평적 축</div><div style="color:var(--ink-dim);font-size:14px;">병렬 전문가(MoE)로 파라미터 확장</div></div>
+          <div class="card fragment fr" style="padding:16px 18px;"><div style="font-size:17px;font-weight:700;margin-bottom:4px;">↕️ 수직적 축</div><div style="color:var(--ink-dim);font-size:14px;">동적 연산 깊이로 FLOPs 절감</div></div>
+          <div class="card fragment zoom" style="padding:16px 18px;border-color:rgba(91,140,255,.5);background:rgba(91,140,255,.12);"><div style="font-size:17px;font-weight:700;margin-bottom:4px;">🧠 <span class="grad-text">2D-AMOE</span></div><div style="color:var(--ink-dim);font-size:14px;">두 축을 결합 → 시너지 극대화</div></div>
         </div>
+        <div class="archslot"></div>
       </div>
     </section>
 
     <!-- 4. 이론적 배경 (한 페이지) -->
     <section class="slide dense" data-out="right">
+      <div class="split">
+        <div>
       <div class="eyebrow">Ⅱ. 이론적 배경</div>
       <h2>Dense의 한계와 <span class="grad-text">선행 연구</span></h2>
       <div class="col-title">1. Dense 모델의 한계와 대안</div>
@@ -286,6 +331,9 @@
         <div class="minicard fragment zoom"><h4>PonderNet</h4><p>종료 확률 분포와 기하분포 간 KL을 정규화. 난이도 맞춤 적응형 계산.</p><div class="metric">▸ bAbI 16% 연산</div></div>
         <div class="minicard fragment zoom"><h4>CoE</h4><p>전문가를 순차 연결해 표현 반복 정제. 유효 깊이 확장.</p><div class="formula">hₜ = Σ wₜⁱ Eᵢ(hₜ₋₁)</div><div class="metric">▸ 메모리 42%↓</div></div>
         <div class="minicard fragment zoom"><h4>Muon 옵티마이저</h4><p>모멘텀 직교화(Newton-Schulz)로 다방향 균형 업데이트.</p><div class="formula">Oₜ = NS(βMₜ₋₁+(1-β)gₜ)</div><div class="metric">▸ AdamW 대비 52% FLOPs</div></div>
+      </div>
+        </div>
+        <div class="archslot"></div>
       </div>
     </section>
 
@@ -363,6 +411,81 @@
 
   </main>
 
+  <!-- 2~4페이지 우측 다이어그램 (복제용) -->
+  <template id="archtpl">
+    <div class="archfig">
+      <div class="archcard">
+        <div class="acap"><b>2D-AMoE architecture</b> · Dense FFN을 전문가(열)×ponder step(행) 2D 격자로 대체. 활성 경로 E1→E4→E2.</div>
+        <svg viewBox="0 0 680 380" role="img" xmlns="http://www.w3.org/2000/svg">
+          <title>Dense LLM block versus 2D-AMoE with route E1 to E4 to E2</title>
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </marker>
+          </defs>
+          <line x1="130" y1="110" x2="130" y2="74" class="arr" marker-end="url(#arrow)"/>
+          <rect class="box-blue" x="55" y="112" width="150" height="54" rx="8" stroke-width="0.5"/>
+          <text class="th t-blue" x="130" y="133" text-anchor="middle" dominant-baseline="central">FFN</text>
+          <text class="ts t-blue" x="130" y="151" text-anchor="middle" dominant-baseline="central">dense</text>
+          <line x1="130" y1="232" x2="130" y2="172" class="arr" marker-end="url(#arrow)"/>
+          <rect class="box-coral" x="55" y="232" width="150" height="54" rx="8" stroke-width="0.5"/>
+          <text class="th t-coral" x="130" y="259" text-anchor="middle" dominant-baseline="central">Attention</text>
+          <line x1="130" y1="322" x2="130" y2="290" class="arr" marker-end="url(#arrow)"/>
+          <text class="th t-fg" x="130" y="352" text-anchor="middle">&lt;Dense LLM&gt;</text>
+
+          <rect class="box-blue" x="300" y="78" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="372" y="78" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="444" y="78" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="516" y="78" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="300" y="150" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="372" y="150" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="444" y="150" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="516" y="150" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="300" y="222" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="372" y="222" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="444" y="222" width="60" height="30" rx="6" stroke-width="0.5"/>
+          <rect class="box-blue" x="516" y="222" width="60" height="30" rx="6" stroke-width="0.5"/>
+
+          <rect class="box-amber" x="372" y="78" width="60" height="30" rx="6" stroke-width="1"/>
+          <rect class="box-amber" x="516" y="150" width="60" height="30" rx="6" stroke-width="1"/>
+          <rect class="box-amber" x="300" y="222" width="60" height="30" rx="6" stroke-width="1"/>
+
+          <text class="ts t-blue"  x="330" y="93"  text-anchor="middle" dominant-baseline="central">E1</text>
+          <text class="ts t-amber" x="402" y="93"  text-anchor="middle" dominant-baseline="central">E2</text>
+          <text class="ts t-blue"  x="474" y="93"  text-anchor="middle" dominant-baseline="central">E3</text>
+          <text class="ts t-blue"  x="546" y="93"  text-anchor="middle" dominant-baseline="central">E4</text>
+          <text class="ts t-blue"  x="330" y="165" text-anchor="middle" dominant-baseline="central">E1</text>
+          <text class="ts t-blue"  x="402" y="165" text-anchor="middle" dominant-baseline="central">E2</text>
+          <text class="ts t-blue"  x="474" y="165" text-anchor="middle" dominant-baseline="central">E3</text>
+          <text class="ts t-amber" x="546" y="165" text-anchor="middle" dominant-baseline="central">E4</text>
+          <text class="ts t-amber" x="330" y="237" text-anchor="middle" dominant-baseline="central">E1</text>
+          <text class="ts t-blue"  x="402" y="237" text-anchor="middle" dominant-baseline="central">E2</text>
+          <text class="ts t-blue"  x="474" y="237" text-anchor="middle" dominant-baseline="central">E3</text>
+          <text class="ts t-blue"  x="546" y="237" text-anchor="middle" dominant-baseline="central">E4</text>
+
+          <text class="ts t-muted" x="588" y="93"  dominant-baseline="central">step 3</text>
+          <text class="ts t-muted" x="588" y="165" dominant-baseline="central">step 2</text>
+          <text class="ts t-muted" x="588" y="237" dominant-baseline="central">step 1</text>
+
+          <line x1="438" y1="290" x2="332" y2="256" class="route" marker-end="url(#arrow)"/>
+          <line x1="330" y1="222" x2="544" y2="184" class="route" marker-end="url(#arrow)"/>
+          <line x1="546" y1="150" x2="404" y2="112" class="route" marker-end="url(#arrow)"/>
+          <line x1="402" y1="78"  x2="438" y2="50"  class="route" marker-end="url(#arrow)"/>
+
+          <rect class="box-coral" x="372" y="290" width="132" height="46" rx="8" stroke-width="0.5"/>
+          <text class="th t-coral" x="438" y="313" text-anchor="middle" dominant-baseline="central">Attention</text>
+          <text class="th t-fg" x="438" y="362" text-anchor="middle">&lt;2D-AMoE&gt;</text>
+        </svg>
+        <div class="archlegend">
+          <span><i class="lg-amber"></i>활성 전문가</span>
+          <span><i class="lg-blue"></i>전문가 풀 E1–E4</span>
+          <span><i class="lg-coral"></i>Attention</span>
+          <span><i class="lg-route"></i>라우팅 경로</span>
+        </div>
+      </div>
+    </div>
+  </template>
+
 <script>
 /* ================= 슬라이드 내비게이션 ================= */
 const slides = [...document.querySelectorAll('.slide')];
@@ -376,6 +499,10 @@ slides.forEach((s,i)=>{
 });
 const dots=[...document.querySelectorAll('.dot')];
 document.getElementById('total').textContent=String(slides.length).padStart(2,'0');
+
+// 2~4페이지 우측 다이어그램 복제 삽입
+const _archTpl=document.getElementById('archtpl');
+if(_archTpl) document.querySelectorAll('.archslot').forEach(s=>s.appendChild(_archTpl.content.cloneNode(true)));
 
 const opposite={left:'right',right:'left',up:'down',down:'up'};
 
