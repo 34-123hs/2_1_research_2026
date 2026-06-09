@@ -34,8 +34,8 @@ def parse_args():
                    help="safetensors 가중치 경로 (없으면 랜덤 init — halting이 비대표적)")
     p.add_argument("--val_bin", default="val.bin")
     p.add_argument("--block_size", type=int, default=768)
-    p.add_argument("--max_tokens", type=int, default=100_000,
-                   help="val.bin 앞에서부터 측정에 쓸 토큰 수 (batch는 1 고정)")
+    p.add_argument("--max_tokens", type=int, default=0,
+                   help="val.bin 앞에서부터 측정에 쓸 토큰 수, batch는 1 고정 (0=전체)")
     p.add_argument("--ponder_steps", type=int, default=8, help="AMoE.max_steps (학습과 일치)")
     # 아키텍처 (train_main.sh와 동일)
     p.add_argument("--dim", type=int, default=768)
@@ -85,7 +85,7 @@ def main():
 
     # 데이터: val.bin 앞에서부터 정확히 max_tokens 토큰 → block_size 청크(마지막은 부분), batch=1
     raw = np.memmap(args.val_bin, dtype=np.uint16, mode="r")
-    n_tok = min(args.max_tokens, len(raw))
+    n_tok = len(raw) if args.max_tokens <= 0 else min(args.max_tokens, len(raw))
     data = np.asarray(raw[:n_tok]).astype(np.int64)
     chunks = [torch.from_numpy(data[i:i + args.block_size]).unsqueeze(0).to(device)
               for i in range(0, n_tok, args.block_size)]
