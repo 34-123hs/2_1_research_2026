@@ -22,6 +22,7 @@ import argparse
 import numpy as np
 import torch
 from torch.utils.flop_counter import FlopCounterMode
+from tqdm import tqdm
 import wandb
 
 from model import LLM, TiktokenHFWrapper
@@ -106,7 +107,7 @@ def main():
 
         t0 = time.perf_counter()
         total_tokens = 0
-        for ch in chunks:
+        for ch in tqdm(chunks, desc="timing"):
             model(input_ids=ch)
             total_tokens += ch.numel()
         sync()
@@ -129,7 +130,7 @@ def main():
 
     fcm = FlopCounterMode(display=False)
     with torch.no_grad(), fcm:
-        for ch in chunks:
+        for ch in tqdm(chunks, desc="flops"):
             model(input_ids=ch)
     for h in handles:
         h.remove()

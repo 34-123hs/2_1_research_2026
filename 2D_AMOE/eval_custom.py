@@ -28,6 +28,7 @@ import argparse
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 import wandb
 
 from model import LLM, TiktokenHFWrapper, MemmapDataset
@@ -87,7 +88,7 @@ def evaluate(model, loader, alpha, device):
     lbl_total    = 0.0      # per-batch LBL 합
     n_batches    = 0
 
-    for batch in loader:
+    for batch in tqdm(loader, desc="eval"):
         ids = batch["input_ids"].to(device)                # [B, block]
         x = model.embedding(ids)                           # [B, block, D]
         x = model.dropout(x)                               # eval ⇒ no-op (fidelity용)
