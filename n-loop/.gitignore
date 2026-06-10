@@ -1,0 +1,39 @@
+# ===== Data (pre-tokenized token shards — corpus는 git에 안 올림) =====
+*.bin
+train.bin
+val.bin
+
+# ===== Model checkpoints / 학습 산출물 =====
+*.safetensors
+*.pt
+*.ckpt
+custom-llm-out/
+hooks_outputs/
+sweep_outputs/
+main_out*/
+bench-out/
+checkpoint-*/
+
+# ===== Logs / W&B / sweep =====
+logs/
+wandb/
+*.log
+.sweep_id
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ===== Virtualenv =====
+.venv/
+venv/
+env/
+
+# ===== OS / editor =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
