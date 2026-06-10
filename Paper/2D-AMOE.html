@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2D-AMOE: 효율적 추론을 위한 동적 그래프 확장 기반의 전문가 혼합 모델</title>
+<script>
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']]
+    },
+    svg: { fontCache: 'global' }
+  };
+</script>
+<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+  body {
+    font-family: "Malgun Gothic", "맑은 고딕", -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height: 1.8;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 48px 24px;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  h1 {
+    font-size: 1.7em;
+    line-height: 1.4;
+    text-align: center;
+    margin-bottom: 0.3em;
+  }
+  .authors {
+    text-align: center;
+    color: #444;
+    margin-bottom: 2.5em;
+  }
+  h2 {
+    font-size: 1.35em;
+    border-bottom: 2px solid #333;
+    padding-bottom: 0.3em;
+    margin-top: 2.2em;
+  }
+  h3 {
+    font-size: 1.15em;
+    margin-top: 1.6em;
+  }
+  h4 {
+    font-size: 1.02em;
+    margin-top: 1.2em;
+    color: #333;
+  }
+  p { text-align: justify; }
+  .placeholder {
+    color: #888;
+    font-style: italic;
+    background: #f6f6f6;
+    padding: 0.6em 1em;
+    border-left: 3px solid #ccc;
+    border-radius: 2px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1.2em 0;
+    font-size: 0.95em;
+  }
+  th, td {
+    border: 1px solid #ccc;
+    padding: 8px 12px;
+    text-align: left;
+  }
+  th {
+    background: #f0f0f0;
+    font-weight: 600;
+  }
+  caption {
+    text-align: left;
+    font-weight: 600;
+    margin-bottom: 0.5em;
+  }
+  figure { text-align: center; margin: 1.5em 0; }
+  figure img { max-width: 100%; height: auto; }
+  figcaption { color: #555; font-size: 0.9em; margin-top: 0.5em; }
+  .references { font-size: 0.92em; }
+  .references p {
+    padding-left: 2em;
+    text-indent: -2em;
+    margin: 0.4em 0;
+  }
+  .note { color: #555; }
+</style>
+</head>
+<body>
+
+<h1>2D-AMOE: 효율적 추론을 위한 동적 그래프 확장 기반의 전문가 혼합 모델</h1>
+<p class="authors">2518 최지완 · 2402 강서희 / 지도교사 오대위</p>
+
+<h2>국문 초록</h2>
+<p class="placeholder">[국문 초록 내용을 400자 내외로 작성하십시오.]</p>
+
+<h2>Ⅰ. 서론</h2>
+<p>기존의 연산 효율화 연구는 주로 순방향 신경망(FFNN)의 구조를 병렬적으로 확장하는 수평적 접근과, 블록 및 FFNN의 깊이를 제어하는 수직적 접근으로 양분되어 발전해 왔다. 이는 현대 대규모 언어 모델(LLM)의 효율성을 제고하는 핵심적인 두 축을 이루고 있으나, MoE 기반의 수평적 확장과 동적 깊이 조절을 통한 수직적 효율화를 단일 아키텍처 내에서 유기적으로 결합하여 시너지를 극대화한 시도는 여전히 제한적이다.</p>
+<p>본 논문에서 정의하는 FFNN의 수평적 축은 고정된 레이어 내에서 MoE와 같이 다수의 연산 모듈이 병렬적으로 배치되어, 입력 토큰에 따라 선택적으로 활성화되는 차원을 의미한다. 이와 대조적으로 수직적 축은 다층 신경망 구조에서 하위 레이어의 출력이 상위 레이어의 입력으로 전달되는 순차적 적층 구조를 뜻하며, 이는 토큰의 복잡도와 난이도에 따라 연산의 깊이를 동적으로 제어하는 대상이 된다.</p>
+<p>이에 본 연구에서는 모델 용량 확장 시 Dense 모델 대비 연산 효율성을 극대화하는 새로운 아키텍처인 2D-AMOE를 제안하고자 한다. 2D-AMOE는 병렬 전문가의 수를 늘림으로써 개별 토큰 연산량의 증가 없이 전체 모델의 파라미터 규모를 확장하며, 입력 토큰의 복잡도에 따라 수직적 연산 깊이를 동적으로 조절하여 추론 연산량(FLOPs)을 획기적으로 절감하는 상호보완적 효율성 체계를 구축하는 것을 목적으로 한다.</p>
+
+<h2>Ⅱ. 이론적 배경</h2>
+
+<h3>1. Dense 모델의 한계와 대안</h3>
+
+<h4>1.1. Dense 구조의 연산적 비효율성</h4>
+<p>기존의 Dense Transformer 모델(Vaswani et al., 2017)은 모든 파라미터가 매 토큰의 연산에 참여한다. 이로 인해 단순한 형태소나 구두점을 처리할 때도 복잡한 논리적 추론이 필요한 토큰을 처리할 때와 동일한 연산 자원이 소모된다는 비효율성이 존재한다. 또한, 모델의 규모가 커짐에 따라 요구되는 연산량 역시 선형적으로 증가하여 대규모 파라미터 모델을 학습하고 추론하는 데 막대한 비용이 발생한다. 이러한 한계는 토큰의 복잡도에 따라 연산량을 동적으로 할당하는 방식이나, 전체 파라미터 중 일부만을 활성화하는 희소 파라미터 방법론을 통해 극복할 수 있다.</p>
+
+<h4>1.2. 동적 연산량 할당</h4>
+<p>연산의 효율성을 높이기 위한 동적 연산량 할당의 대표적인 선행 연구로는 ACT(Graves, 2016)와 PonderNet(Banino et al., 2021)이 있다. ACT는 모델이 자체적으로 연산의 조기 종료 시점을 결정하여 동적인 연산량 조절을 달성하였다. 반면 PonderNet은 이산 기하분포를 적용하여 블록의 반복 횟수를 확률적으로 제어함으로써, 모델 스스로 입력의 난이도에 맞춰 적절한 연산량을 할당하도록 유도하였다.</p>
+
+<h4>1.3. 희소 파라미터</h4>
+<p>모든 파라미터가 활성화되는 Dense 모델의 근본적인 비효율성을 개선하기 위해 MoE(Shazeer et al., 2017)와 같은 희소 아키텍처가 도입되었다. MoE 구조에서는 라우팅 네트워크가 입력 토큰에 적합한 소수의 전문가 네트워크만을 선택적으로 활성화한다. 이를 통해 개별 토큰 연산에 참여하는 파라미터의 수는 제한하면서도 전체 모델의 파라미터 규모는 크게 확장할 수 있어, 연산량을 획기적으로 통제하는 동시에 모델의 성능을 향상할 수 있다.</p>
+
+<h3>2. 주요 선행 연구</h3>
+
+<h4>2.1. VersatileFFN</h4>
+<p>VersatileFFN은 인간의 인지 과정을 모사해 가상 전문가 경로와 깊은생각 경로 두가지로 토큰을 나누고 섞는 형식의 모델로 354.71M 모델에서 Vanilla 2.779 에서 VersatileFFN 2.617 으로 720.81M 모델에서 Vanilla 2.519 에서 VersatileFFN 2.430으로, 1.21B 모델에서 Vanilla 2.385 에서 VersatileFFN 2.319 로 Loss를 줄인 바 있다.</p>
+
+<h4>2.2. PonderNet</h4>
+<p>PonderNet(Banino et al., 2021)은 입력의 복잡도에 맞춰 연산 횟수를 동적으로 조절하는 적응형 계산 모델이다. 이 모델은 각 연산 단계의 종료 여부를 확률적 의사결정 문제로 정의하고, 예측된 종료 확률 분포와 기하분포 간의 KL Divergence를 정규화 항으로 사용하여 정확도와 효율성의 균형을 맞춘다. 실험 결과, Parity 과제의 외삽 환경에서 완벽에 가까운 성능을 달성하였으며, bAbI 벤치마크에서도 기존 모델(Universal Transformer 등) 대비 약 16%의 연산량만으로 20개 과제를 모두 해결하며 뛰어난 일반화 성능과 연산 효율성을 입증하였다.</p>
+
+<h4>2.3. CoE</h4>
+<p>기존 MoE의 병렬적 독립 연산 한계를 극복하기 위해 도입된 CoE는 전문가들을 순차적으로 연결하여 은닉 표현을 반복 정제하는 아키텍처이다. 이 과정은 이전 단계의 결과($h_{t-1}$)를 라우팅 가중치($w_t^i$)에 따라 $i$번째 전문가($E_i$)가 이어받는 다음 수식으로 정의된다.</p>
+<p>$$h_t = \sum_{i} w_t^i E_i(h_{t-1})$$</p>
+<p>단일 레이어 내에서 독립적인 라우터를 거치며 전문가가 동적으로 재선택되므로 모델의 유효 깊이가 확장된다. 기존 MoE 대비 수학 추론에서 더 뛰어난 검증 손실 완화와 최대 42%의 메모리 절감을 달성하였다.</p>
+
+<h4>2.4. Muon 옵티마이저</h4>
+<p>Muon은 기존 AdamW의 계산 비효율성과 업데이트 편향성을 개선하기 위해 행렬 직교화를 기반으로 고안된 옵티마이저이다. 그래디언트의 크기만을 조정하는 기존 방식과 달리, Muon은 그래디언트 모멘텀을 직교화하여 겹치지 않는 다방향 업데이트를 수행한다. 이 과정은 다음의 모멘텀 연산과 Newton-Schulz 반복 기반의 직교화 수식으로 정의된다.</p>
+<p>$$M_t = \beta M_{t-1} + (1 - \beta) g_t$$</p>
+<p>$$O_t = \text{Newton-Schulz}(M_t)$$</p>
+<p>여기서 $M_t$는 그래디언트 모멘텀, $O_t$는 직교화된 업데이트 행렬을 의미한다. 이를 통해 특정 특이값 방향으로 학습이 과적합되는 현상을 방지하고 균형 잡힌 표현 학습을 유도한다. 특히 Moonlight-16B(Liu et al., 2025) 연구에서 Muon은 AdamW 대비 약 52%의 FLOPs만으로 동등한 성능을 달성하여 2배 수준의 계산 효율성을 입증하였다. 본 연구에서는 이러한 Muon의 높은 효율성을 활용하여 모델 최적화를 진행한다.</p>
+
+<h2>Ⅲ. 연구 방법 및 절차</h2>
+
+<h3>1. 데이터셋 구축 및 전처리</h3>
+
+<h4>1.1. 학습 데이터셋</h4>
+<p>본 연구는 원시 WARC 파일에 trafilatura 추출 방식 및 엄격한 품질 필터링(Penedo et al., 2024)을 적용하여 MMLU 등 다양한 벤치마크에서 성능 우위를 입증한 FineWeb 데이터셋의 10B 토큰 공식 서브셋(sample-10BT)을 학습에 활용하였다.</p>
+
+<h4>1.2. 전처리 및 토큰화</h4>
+<p>초대형 코퍼스의 학습 병목을 해소하기 위해, 본 연구에서는 Rust 기반의 고속 BPE 알고리즘 구현체인 tiktoken을 활용하였다. 토큰화 공정에는 50,257개의 어휘 크기를 갖는 r50k_base 사전을 적용하였는데, 이는 의미적 정보의 압축률이 뛰어날 뿐만 아니라 최대 토큰 인덱스(0~50,256)가 16비트 정수형(uint16) 데이터 타입에 완전히 수용되도록 보장한다.</p>
+<p>전처리 결과, 학습용 분할(train.bin)은 약 2B 토큰(3.72 GiB), 검증용 분할(val.bin)은 40M 토큰(76.3 MiB) 규모의 uint16 기반 NumPy 바이너리 배열로 구축되었다. 특히 데이터셋 분할 시 말뭉치의 경계를 직접 탐색하여 절단함으로써, 검증 데이터셋에서 컨텍스트의 시작이 단절되는 현상을 방지하고 메모리 효율성을 극대화하였다.</p>
+
+<h3>2. 모델 학습 설정</h3>
+
+<h4>2.1. MoE (대조군1)</h4>
+<p>GPT-2에서 FFN을 MoE layer로 교체, ReLU를 GeLU로 교체, Attention을 FlashAttention으로 교체한 모델로, 현대적이고 대중적인 MoE architecture다. Load Balancing Loss를 추가하였으며, alpha값은 ____로 설정하였다.</p>
+
+<h4>2.2. n-Loop MoE (대조군2)</h4>
+<p>n-Loop MoE는 2D-AMoE의 수직 반복의 로직이 정말 효율적인가에 대한 대조군으로 2D-AMoE의 이산 기하분포를 따르는 로직 대신, 단순히 MoE layer를 residual 하게 n번 반복한 구현체이다. MoE Layer를 반복했다는 것을 제외하면 2.1의 MoE와 완전히 architecture가 같다.</p>
+
+<h4>2.3. 2D-AMoE (실험군)</h4>
+<p>본 논문의 핵심 제안 모델인 2D-AMoE 는 기존 MoE에서 수직 방향 재귀를 추가하고 이산 기하분포를 적용하여 residual하게 연결한 모델로 PonderNet에서 영감을 받았다.</p>
+
+<h2>Ⅳ. 연구 결과</h2>
+
+<h3>1. n-Loop MoE (대조군2): 수직 반복 횟수에 따른 성능</h3>
+<p>n-Loop MoE를 수직 반복 횟수 $n \in \{1, 2, 4, 6, 8\}$ 에 대해 학습하였다. 모든 모델은 332.1M 파라미터로 동일하며, $n$ 만을 달리하였다. 최종 검증 손실은 $n=2$ 에서 최저(3.164)를 기록한 뒤 $n$ 이 증가할수록 도리어 악화되어, 단순 residual 반복만으로는 깊이 확장의 이득을 얻지 못함을 보였다.</p>
+
+<table>
+  <caption>표 1. n-Loop MoE 반복 횟수별 최종 성능 (332.1M, max_steps 54,254)</caption>
+  <thead>
+    <tr><th>run</th><th>반복 $n$</th><th>eval/loss</th><th>perplexity</th><th>n_params</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>full-n1</td><td>1</td><td>3.187</td><td>24.22</td><td>332.1M</td></tr>
+    <tr><td>full-n2</td><td>2</td><td><strong>3.164</strong></td><td><strong>23.67</strong></td><td>332.1M</td></tr>
+    <tr><td>full-n4</td><td>4</td><td>3.237</td><td>25.47</td><td>332.1M</td></tr>
+    <tr><td>full-n6</td><td>6</td><td>3.369</td><td>29.04</td><td>332.1M</td></tr>
+    <tr><td>full-n8</td><td>8</td><td>3.461</td><td>31.86</td><td>332.1M</td></tr>
+  </tbody>
+</table>
+
+<figure>
+  <img src="assets/nloop_final_vs_n.png" alt="반복 횟수에 따른 최종 손실">
+  <figcaption>그림 1. 수직 반복 횟수 $n$ 에 따른 최종 eval/loss 및 perplexity. $n=2$ 에서 최저 후 단조 증가.</figcaption>
+</figure>
+
+<figure>
+  <img src="assets/nloop_eval_loss.png" alt="검증 손실 곡선">
+  <figcaption>그림 2. 반복 횟수별 검증 손실 곡선.</figcaption>
+</figure>
+
+<figure>
+  <img src="assets/nloop_train_loss.png" alt="학습 손실 곡선">
+  <figcaption>그림 3. 반복 횟수별 학습 손실 곡선.</figcaption>
+</figure>
+
+<h3>2. 2D-AMoE 효율성 분석</h3>
+
+<h4>① FLOPs (하드웨어·dtype·compile 무관)</h4>
+<table>
+  <thead>
+    <tr><th>구분</th><th>2D-AMoE</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>total</td><td>80.02 TFLOP (100k 토큰)</td></tr>
+    <tr><td>per token</td><td>0.800 GFLOP/token (800.2 MFLOP)</td></tr>
+    <tr><td>avg ponder</td><td>2.134 step/token (max 8)</td></tr>
+  </tbody>
+</table>
+<p class="note">2D-AMoE op 분해: mm 85.0% · addmm 11.5% · sdpa(attention) 3.5% → 거의 expert/head matmul이 지배. 적응 halting으로 토큰당 평균 2.13/8 스텝만 사고(조기 종료 작동).</p>
+
+<h4>② Wall-clock (H100, batch=1)</h4>
+<table>
+  <thead>
+    <tr><th>조건</th><th>total</th><th>throughput</th><th>ms/token</th><th>achieved</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>fp32 eager</td><td>10.82 s</td><td>9,244 tok/s</td><td>0.1082</td><td>7.40 TFLOP/s</td></tr>
+    <tr><td>bf16 + compile</td><td>15.18 s</td><td>6,588 tok/s</td><td>0.1518</td><td>5.27 TFLOP/s</td></tr>
+  </tbody>
+</table>
+<p class="note">→ bf16+compile = 0.71x (오히려 느림!)</p>
+
+<h4>③ Compile 시간 (cold cache)</h4>
+<table>
+  <thead>
+    <tr><th>구분</th><th>시간</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>warmup 1st pass</td><td>28.39 s</td></tr>
+    <tr><td>추정 compile 오버헤드</td><td>~13.21 s</td></tr>
+  </tbody>
+</table>
+
+<h2>Ⅴ. 고찰</h2>
+<p class="placeholder">[결과에 대한 해석, 제안 모델(2D-AMOE)과의 비교 분석, 예상과의 차이, 오차 원인 분석 등을 작성하세요.]</p>
+
+<h2>Ⅵ. 결론</h2>
+<p class="placeholder">[연구의 최종적인 결론과 본 연구가 향후 LLM 효율성 개선에 미칠 영향 및 한계점 등을 요약하여 작성하세요.]</p>
+
+<h2>참고문헌</h2>
+<div class="references">
+<p>[1] Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., ... & Polosukhin, I. (2017). Attention is all you need. Advances in Neural Information Processing Systems, 30.</p>
+<p>[2] Shazeer, N., Mirhoseini, A., Maziarz, K., Davis, A., Le, Q., Hinton, G., & Dean, J. (2017). Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. arXiv preprint arXiv:1701.06538.</p>
+<p>[3] Graves, A. (2016). Adaptive computation time for recurrent neural networks. arXiv preprint arXiv:1603.08983.</p>
+<p>[4] Banino, A., Balaguer, J., Blundell, C., ... & Hassabis, D. (2021). PonderNet: Learning to ponder. arXiv preprint arXiv:2107.05407.</p>
+<p>[5] Fedus, W., Zoph, B., & Shazeer, N. (2022). Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity. The Journal of Machine Learning Research, 23(1), 5232-5270.</p>
+<p>[6] Penedo, G., et al. (2024). The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale. arXiv preprint arXiv:2406.17557.</p>
+<p>[7] Liu, J., et al. (2025). Moonlight: A compute-optimal MoE scaling law and model. arXiv preprint (under review).</p>
+</div>
+
+</body>
+</html>
