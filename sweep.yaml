@@ -1,0 +1,53 @@
+# sweep.yaml — wandb sweep 정의 (단일 GPU)
+# 대조군(고정 n회 재귀 MoE). 모델 크기는 고정, 학습 HP + 반복횟수 n을 random 탐색
+# 등록: wandb sweep --project <my-project> sweep.yaml
+# 실행: wandb agent <entity>/<my-project>/<id>
+
+program: train_with_hooks.py
+
+method: random
+metric:
+  name: eval/loss
+  goal: minimize
+
+early_terminate:
+  type: hyperband
+  min_iter: 10
+  eta: 3
+
+parameters:
+  # ===== 고정 (대조군 아키텍처/스케줄) =====
+  train_bin_path:  {value: train.bin}
+  val_bin_path:    {value: val.bin}
+  output_dir:      {value: sweep_outputs}
+  max_size:        {value: 50000000}     # sweep proxy (코퍼스 크기는 동일화 제외)
+  max_val_size:    {value: 200000}
+  epochs:          {value: 1}
+  eval_interval:   {value: 200}          # proxy에서 hyperband 가지치기 살리기 위해 촘촘히
+  warmup_steps:    {value: 150}
+  block_size:      {value: 768}
+  batch_size:      {value: 8}
+  grad_accum:      {value: 6}            # 유효 배치 48
+  dim:             {value: 768}
+  depth:           {value: 12}           # = core_depth
+  heads:           {value: 12}
+  dim_head:        {value: 64}
+  mlp_dim:         {value: 3072}
+  dropout:         {value: 0}
+  lambda_p:        {value: 0.3}          # (레거시·미사용) 대조군은 ponder 없음
+  grad_checkpoint: {value: 0}            # --no-grad_checkpoint
+  compile:         {value: 0}            # MoE 동적 sort/scatter routing은 torch.compile 비호환(backward illegal memory access) → off
+
+  # ===== 탐색 =====
+  lr:
+    distribution: log_uniform_values
+    min: 0.0001
+    max: 0.005
+  muon_lr:
+    distribution: log_uniform_values
+    min: 0.005
+    max: 0.05
+  alpha:
+    values: [0.01, 0.005, 0.02, 0.05]
+  ponder_steps:                          # 최대 반복 횟수 n (= AMoE.max_steps, n-loop의 n)
+    values: [1, 2, 4, 6, 8]

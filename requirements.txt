@@ -1,0 +1,7 @@
+transformers
+accelerate
+wandb
+tiktoken
+numpy
+einops
+torch
