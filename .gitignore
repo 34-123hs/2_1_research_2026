@@ -1,0 +1,16 @@
+# Model weights and checkpoints
+n-loop_checkpoint/
+2D_AMOE_checkpoint/
+Vanilla_checkpoint/
+*_checkpoint/
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+
+# Training datasets
+data/
+*.bin
+
+# Raw experiment exports
+Paper/wandb_data_*/

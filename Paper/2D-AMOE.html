@@ -3,7 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>2D-AMOE: 효율적 추론을 위한 동적 그래프 확장 기반의 전문가 혼합 모델</title>
+<title>2D-AMoE: 효율적 추론을 위한 동적 그래프 확장 기반의 전문가 혼합 모델</title>
+<script>
+  // 새로고침 시 URL 해시(#...)로 자동 점프 방지 (목차 클릭 이동은 그대로 동작)
+  if (location.hash) { history.replaceState(null, '', location.pathname + location.search); }
+</script>
 <script>
   MathJax = {
     tex: {
@@ -13,9 +17,9 @@
     svg: { fontCache: 'global' }
   };
 </script>
-<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <style>
+  html { scroll-behavior: smooth; }
   body {
     font-family: "Malgun Gothic", "맑은 고딕", -apple-system, BlinkMacSystemFont, sans-serif;
     line-height: 1.8;
@@ -25,6 +29,26 @@
     color: #1a1a1a;
     background: #fff;
   }
+  .toc {
+    background: #f8f8f8;
+    border: 1px solid #e2e2e2;
+    border-radius: 6px;
+    padding: 8px 28px 20px;
+    margin: 2em 0;
+  }
+  .toc-title {
+    border: none;
+    font-size: 1.15em;
+    margin: 0.6em 0 0.2em;
+    padding: 0;
+  }
+  .toc ol { margin: 0.3em 0; padding-left: 1.4em; }
+  .toc > ol { list-style: none; padding-left: 0; }
+  .toc > ol > li { margin: 0.25em 0; }
+  .toc ol ol { list-style: lower-alpha; color: #666; margin: 0.2em 0 0.4em 0.4em; }
+  .toc a { color: #2a4d8f; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  h2[id], h3[id] { scroll-margin-top: 12px; }
   h1 {
     font-size: 1.7em;
     line-height: 1.4;
@@ -80,6 +104,8 @@
     font-weight: 600;
     margin-bottom: 0.5em;
   }
+  tr.best td { background: #eafaf0; font-weight: 600; }
+  .src { color: #888; font-weight: 400; font-size: 0.85em; }
   figure { text-align: center; margin: 1.5em 0; }
   figure img { max-width: 100%; height: auto; }
   figcaption { color: #555; font-size: 0.9em; margin-top: 0.5em; }
@@ -94,18 +120,40 @@
 </head>
 <body>
 
-<h1>2D-AMOE: 효율적 추론을 위한 동적 그래프 확장 기반의 전문가 혼합 모델</h1>
+<h1>2D-AMoE: 효율적 추론을 위한 동적 그래프 확장 기반의 전문가 혼합 모델</h1>
 <p class="authors">2518 최지완 · 2402 강서희 / 지도교사 오대위</p>
 
-<h2>국문 초록</h2>
-<p class="placeholder">[국문 초록 내용을 400자 내외로 작성하십시오.]</p>
+<nav class="toc">
+  <h2 class="toc-title">목차</h2>
+  <ol>
+    <li><a href="#abstract">국문 초록</a></li>
+    <li><a href="#intro">Ⅰ. 서론</a></li>
+    <li><a href="#background">Ⅱ. 이론적 배경</a></li>
+    <li><a href="#method">Ⅲ. 연구 방법 및 절차</a></li>
+    <li><a href="#results">Ⅳ. 연구 결과</a>
+      <ol>
+        <li><a href="#res-nloop-full">n-Loop MoE (대조군)</a></li>
+        <li><a href="#res-amoe-main">2D-AMoE main 모델 평가</a></li>
+      </ol>
+    </li>
+    <li><a href="#discussion">Ⅴ. 고찰</a></li>
+    <li><a href="#conclusion">Ⅵ. 결론</a></li>
+    <li><a href="#references">참고문헌</a></li>
+    <li><a href="#appendix-a">부록 A. 학습 손실 곡선</a></li>
+    <li><a href="#appendix-b">부록 B. n-Loop MoE 하이퍼파라미터 탐색 (Sweep)</a></li>
+    <li><a href="#appendix-c">부록 C. 2D-AMoE 하이퍼파라미터 탐색 (Sweep)</a></li>
+  </ol>
+</nav>
 
-<h2>Ⅰ. 서론</h2>
-<p>기존의 연산 효율화 연구는 주로 순방향 신경망(FFNN)의 구조를 병렬적으로 확장하는 수평적 접근과, 블록 및 FFNN의 깊이를 제어하는 수직적 접근으로 양분되어 발전해 왔다. 이는 현대 대규모 언어 모델(LLM)의 효율성을 제고하는 핵심적인 두 축을 이루고 있으나, MoE 기반의 수평적 확장과 동적 깊이 조절을 통한 수직적 효율화를 단일 아키텍처 내에서 유기적으로 결합하여 시너지를 극대화한 시도는 여전히 제한적이다.</p>
-<p>본 논문에서 정의하는 FFNN의 수평적 축은 고정된 레이어 내에서 MoE와 같이 다수의 연산 모듈이 병렬적으로 배치되어, 입력 토큰에 따라 선택적으로 활성화되는 차원을 의미한다. 이와 대조적으로 수직적 축은 다층 신경망 구조에서 하위 레이어의 출력이 상위 레이어의 입력으로 전달되는 순차적 적층 구조를 뜻하며, 이는 토큰의 복잡도와 난이도에 따라 연산의 깊이를 동적으로 제어하는 대상이 된다.</p>
-<p>이에 본 연구에서는 모델 용량 확장 시 Dense 모델 대비 연산 효율성을 극대화하는 새로운 아키텍처인 2D-AMOE를 제안하고자 한다. 2D-AMOE는 병렬 전문가의 수를 늘림으로써 개별 토큰 연산량의 증가 없이 전체 모델의 파라미터 규모를 확장하며, 입력 토큰의 복잡도에 따라 수직적 연산 깊이를 동적으로 조절하여 추론 연산량(FLOPs)을 획기적으로 절감하는 상호보완적 효율성 체계를 구축하는 것을 목적으로 한다.</p>
+<h2 id="abstract">국문 초록</h2>
+<p>본 연구는 MoE의 수평적 확장과 동적 수직 깊이 조절을 단일 아키텍처로 결합한 2D-AMoE를 제안한다. PonderNet의 이산 기하분포 기반 적응적 halting을 MoE에 도입하여, 입력 토큰의 복잡도에 따라 연산 깊이를 동적으로 조절하고 추론 연산량을 절감하고자 하였다. 동일 규모(332M)의 단순 수직 반복 대조군(n-Loop MoE)과 비교한 결과, 2D-AMoE의 최종 task_CE는 3.394로 n-Loop MoE 중 task_CE가 가장 낮은 $n=4$ 의 3.218보다 다소 높았다. 그러나 적응적 halting이 연산 깊이를 자율적으로 조절하였고, 제한된 탐색 예산으로 인한 학습 초기 expert collapse에도 불구하고 손실 차가 약 0.18에 그친 점은, 추가적인 학습·탐색을 통해 2D-AMoE가 더 개선될 여지가 충분함을 시사한다.</p>
 
-<h2>Ⅱ. 이론적 배경</h2>
+<h2 id="intro">Ⅰ. 서론</h2>
+<p>기존의 연산 효율화 연구는 주로 순방향 신경망(FFN)의 구조를 병렬적으로 확장하는 수평적 접근과, 블록 및 FFN의 깊이를 제어하는 수직적 접근으로 양분되어 발전해 왔다. 이는 현대 대규모 언어 모델(LLM)의 효율성을 제고하는 핵심적인 두 축을 이루고 있으나, MoE 기반의 수평적 확장과 동적 깊이 조절을 통한 수직적 효율화를 단일 아키텍처 내에서 유기적으로 결합하여 시너지를 극대화한 시도는 여전히 제한적이다.</p>
+<p>본 논문에서 정의하는 FFN의 수평적 축은 고정된 레이어 내에서 MoE와 같이 다수의 연산 모듈이 병렬적으로 배치되어, 입력 토큰에 따라 선택적으로 활성화되는 차원을 의미한다. 이와 대조적으로 수직적 축은 다층 신경망 구조에서 하위 레이어의 출력이 상위 레이어의 입력으로 전달되는 순차적 적층 구조를 뜻하며, 이는 토큰의 복잡도와 난이도에 따라 연산의 깊이를 동적으로 제어하는 대상이 된다.</p>
+<p>이에 본 연구에서는 모델 용량 확장 시 Dense 모델 대비 연산 효율성을 극대화하는 새로운 아키텍처인 2D-AMoE를 제안하고자 한다. 2D-AMoE는 병렬 전문가의 수를 늘림으로써 개별 토큰 연산량의 증가 없이 전체 모델의 파라미터 규모를 확장하며, 입력 토큰의 복잡도에 따라 수직적 연산 깊이를 동적으로 조절하여 추론 연산량(FLOPs)을 획기적으로 절감하는 상호보완적 효율성 체계를 구축하는 것을 목적으로 한다.</p>
+
+<h2 id="background">Ⅱ. 이론적 배경</h2>
 
 <h3>1. Dense 모델의 한계와 대안</h3>
 
@@ -121,13 +169,13 @@
 <h3>2. 주요 선행 연구</h3>
 
 <h4>2.1. VersatileFFN</h4>
-<p>VersatileFFN은 인간의 인지 과정을 모사해 가상 전문가 경로와 깊은생각 경로 두가지로 토큰을 나누고 섞는 형식의 모델로 354.71M 모델에서 Vanilla 2.779 에서 VersatileFFN 2.617 으로 720.81M 모델에서 Vanilla 2.519 에서 VersatileFFN 2.430으로, 1.21B 모델에서 Vanilla 2.385 에서 VersatileFFN 2.319 로 Loss를 줄인 바 있다.</p>
+<p>VersatileFFN[8]은 인간의 인지 과정을 모사해 가상 전문가 경로와 깊은생각 경로 두가지로 토큰을 나누고 섞는 형식의 모델로 354.71M 모델에서 Vanilla 2.779 에서 VersatileFFN 2.617 으로 720.81M 모델에서 Vanilla 2.519 에서 VersatileFFN 2.430으로, 1.21B 모델에서 Vanilla 2.385 에서 VersatileFFN 2.319 로 Loss를 줄인 바 있다.</p>
 
 <h4>2.2. PonderNet</h4>
 <p>PonderNet(Banino et al., 2021)은 입력의 복잡도에 맞춰 연산 횟수를 동적으로 조절하는 적응형 계산 모델이다. 이 모델은 각 연산 단계의 종료 여부를 확률적 의사결정 문제로 정의하고, 예측된 종료 확률 분포와 기하분포 간의 KL Divergence를 정규화 항으로 사용하여 정확도와 효율성의 균형을 맞춘다. 실험 결과, Parity 과제의 외삽 환경에서 완벽에 가까운 성능을 달성하였으며, bAbI 벤치마크에서도 기존 모델(Universal Transformer 등) 대비 약 16%의 연산량만으로 20개 과제를 모두 해결하며 뛰어난 일반화 성능과 연산 효율성을 입증하였다.</p>
 
 <h4>2.3. CoE</h4>
-<p>기존 MoE의 병렬적 독립 연산 한계를 극복하기 위해 도입된 CoE는 전문가들을 순차적으로 연결하여 은닉 표현을 반복 정제하는 아키텍처이다. 이 과정은 이전 단계의 결과($h_{t-1}$)를 라우팅 가중치($w_t^i$)에 따라 $i$번째 전문가($E_i$)가 이어받는 다음 수식으로 정의된다.</p>
+<p>기존 MoE의 병렬적 독립 연산 한계를 극복하기 위해 도입된 CoE[9]는 전문가들을 순차적으로 연결하여 은닉 표현을 반복 정제하는 아키텍처이다. 이 과정은 이전 단계의 결과($h_{t-1}$)를 라우팅 가중치($w_t^i$)에 따라 $i$번째 전문가($E_i$)가 이어받는 다음 수식으로 정의된다.</p>
 <p>$$h_t = \sum_{i} w_t^i E_i(h_{t-1})$$</p>
 <p>단일 레이어 내에서 독립적인 라우터를 거치며 전문가가 동적으로 재선택되므로 모델의 유효 깊이가 확장된다. 기존 MoE 대비 수학 추론에서 더 뛰어난 검증 손실 완화와 최대 42%의 메모리 절감을 달성하였다.</p>
 
@@ -137,7 +185,7 @@
 <p>$$O_t = \text{Newton-Schulz}(M_t)$$</p>
 <p>여기서 $M_t$는 그래디언트 모멘텀, $O_t$는 직교화된 업데이트 행렬을 의미한다. 이를 통해 특정 특이값 방향으로 학습이 과적합되는 현상을 방지하고 균형 잡힌 표현 학습을 유도한다. 특히 Moonlight-16B(Liu et al., 2025) 연구에서 Muon은 AdamW 대비 약 52%의 FLOPs만으로 동등한 성능을 달성하여 2배 수준의 계산 효율성을 입증하였다. 본 연구에서는 이러한 Muon의 높은 효율성을 활용하여 모델 최적화를 진행한다.</p>
 
-<h2>Ⅲ. 연구 방법 및 절차</h2>
+<h2 id="method">Ⅲ. 연구 방법 및 절차</h2>
 
 <h3>1. 데이터셋 구축 및 전처리</h3>
 
@@ -150,22 +198,30 @@
 
 <h3>2. 모델 학습 설정</h3>
 
-<h4>2.1. MoE (대조군1)</h4>
-<p>GPT-2에서 FFN을 MoE layer로 교체, ReLU를 GeLU로 교체, Attention을 FlashAttention으로 교체한 모델로, 현대적이고 대중적인 MoE architecture다. Load Balancing Loss를 추가하였으며, alpha값은 ____로 설정하였다.</p>
+<h4>2.1. MoE</h4>
+<p>GPT-2에서 FFN을 MoE layer로 교체, ReLU를 GeLU로 교체, Attention을 FlashAttention으로 교체한 모델로, 현대적이고 대중적인 MoE architecture다. Load Balancing Loss를 추가하였다. 본 논문은 코드의 재사용성을 위해 n-Loop MoE와 통합하여 코드를 작성하였으며, MoE는 n-Loop MoE에서 $n=1$ 인 경우에 해당한다.</p>
 
-<h4>2.2. n-Loop MoE (대조군2)</h4>
-<p>n-Loop MoE는 2D-AMoE의 수직 반복의 로직이 정말 효율적인가에 대한 대조군으로 2D-AMoE의 이산 기하분포를 따르는 로직 대신, 단순히 MoE layer를 residual 하게 n번 반복한 구현체이다. MoE Layer를 반복했다는 것을 제외하면 2.1의 MoE와 완전히 architecture가 같다.</p>
+<p>MoE 학습 시 일부 전문가에게 토큰이 쏠리는 expert collapse 현상을 막기 위해, 데이터에 대한 CE(Cross Entropy) Loss(task_CE)뿐만 아니라 Load Balance Loss(LBL)를 추가하였다. LBL은 Switch Transformer[5]의 구현을 그대로 따라 다음과 같이 정의된다.</p>
+<p>$$\text{LBL} = \alpha \, N \sum_{i=1}^{N} f_i P_i$$</p>
+<p>여기서 $N$ 은 전문가의 수, $f_i$ 는 $i$ 번째 전문가로 분배된 토큰의 비율, $P_i$ 는 라우터가 $i$ 번째 전문가에 할당한 평균 확률, $\alpha$ 는 가중치 계수를 의미한다. $\alpha$ 값은 Sweep에서 최적인 0.005로 설정하였다.</p>
 
-<h4>2.3. 2D-AMoE (실험군)</h4>
+<h4>2.2. n-Loop MoE</h4>
+<p>n-Loop MoE는 2D-AMoE의 수직 반복의 로직이 정말 효율적인가에 대한 대조군으로 2D-AMoE의 이산 기하분포를 따르는 로직 대신, 단순히 MoE layer를 residual 하게 $n \in \{2, 4, 6, 8\}$ 번 반복한 구현체이다. MoE Layer를 반복했다는 것을 제외하면 2.1의 MoE와 완전히 architecture가 같다. 이 또한 alpha의 값은 0.005로 같다.</p>
+
+<h4>2.3. 2D-AMoE</h4>
 <p>본 논문의 핵심 제안 모델인 2D-AMoE 는 기존 MoE에서 수직 방향 재귀를 추가하고 이산 기하분포를 적용하여 residual하게 연결한 모델로 PonderNet에서 영감을 받았다.</p>
+<p>전체 학습 손실은 과제 손실(task_CE)과 load-balancing 손실(LBL, 식은 2.1 참조)에 더해, 각 레이어의 halting 분포를 기하분포 prior로 정규화하는 ponder 손실 $\mathcal{L}_{\text{ponder}}$ 을 포함한다. PonderNet을 따라, 이는 절단·정규화된 기하분포 prior $p_G$ 와 레이어별 halting 분포 $p_\ell$ 사이의 KL divergence를 레이어에 대해 평균한 값으로 정의된다.</p>
+<p>$$p_G(t) = \frac{\lambda_p (1-\lambda_p)^{t}}{\displaystyle\sum_{\tau=0}^{T-1} \lambda_p (1-\lambda_p)^{\tau}}, \qquad t = 0, 1, \dots, T-1$$</p>
+<p>$$\mathcal{L}_{\text{ponder}} = \frac{1}{L}\sum_{\ell=1}^{L} \sum_{t=0}^{T-1} p_\ell(t)\,\Big(\log p_\ell(t) - \log p_G(t)\Big)$$</p>
+<p>여기서 $T$ 는 최대 ponder 스텝 수, $L$ 은 레이어 수, $p_\ell(t)$ 는 $\ell$ 번째 레이어에서 스텝 $t$ 에 종료(halt)할 확률(배치 및 전문가 차원에 대해 평균), $\lambda_p$ 는 기하분포 prior의 파라미터이다. 이 항은 모델이 불필요하게 깊은 연산을 수행하지 않도록 유도하여 조기 종료를 학습시킨다.</p>
 
-<h2>Ⅳ. 연구 결과</h2>
+<h2 id="results">Ⅳ. 연구 결과</h2>
 
-<h3>1. n-Loop MoE (대조군2): 수직 반복 횟수에 따른 성능</h3>
-<p>n-Loop MoE를 수직 반복 횟수 $n \in \{1, 2, 4, 6, 8\}$ 에 대해 학습하였다. 모든 모델은 332.1M 파라미터로 동일하며, $n$ 만을 달리하였다. 최종 검증 손실은 $n=2$ 에서 최저(3.164)를 기록한 뒤 $n$ 이 증가할수록 도리어 악화되어, 단순 residual 반복만으로는 깊이 확장의 이득을 얻지 못함을 보였다.</p>
+<h3 id="res-nloop-full">1. n-Loop MoE (대조군): 수직 반복 횟수에 따른 성능</h3>
+<p>n-Loop MoE를 수직 반복 횟수 $n \in \{1, 2, 4, 6, 8\}$ 에 대해 학습하였다. 모든 모델은 332.1M의 파라미터와 $n$ 값을 제외한 모델 아키텍처가 완전히 동일하고, $n$ 값만의 차이를 가진다. eval/loss(= task_CE + 0.005·LBL) 기준으로는 $n=2$ 에서 최저(3.164, 표 1)를 보이는데, 이는 load-balancing 손실(LBL)이 $n$ 이 커질수록 증가하여 eval/loss를 끌어올리기 때문이다. 반면 순수 품질 지표인 task_CE 기준으로는 $n$ 이 커질수록 손실이 개선되어 $n=4$ 에서 최저(3.218, 표 2)를 기록하였다. (반복 횟수별 손실 곡선은 부록 A 참조.)</p>
 
 <table>
-  <caption>표 1. n-Loop MoE 반복 횟수별 최종 성능 (332.1M, max_steps 54,254)</caption>
+  <caption>표 1. n-Loop MoE 반복 횟수별 최종 성능 (332.1M, 학습 54,254 step, 학습 중 eval 검증셋 200K 토큰) <span class="src">[출처: nLoopMoE / run full-n1…full-n8]</span></caption>
   <thead>
     <tr><th>run</th><th>반복 $n$</th><th>eval/loss</th><th>perplexity</th><th>n_params</th></tr>
   </thead>
@@ -178,66 +234,78 @@
   </tbody>
 </table>
 
-<figure>
-  <img src="assets/nloop_final_vs_n.png" alt="반복 횟수에 따른 최종 손실">
-  <figcaption>그림 1. 수직 반복 횟수 $n$ 에 따른 최종 eval/loss 및 perplexity. $n=2$ 에서 최저 후 단조 증가.</figcaption>
-</figure>
+<p>학습 종료 후, $n=1, 2, 4$ 에 대해 정확도용 평가(eval-quality)와 효율용 평가(eval-compute)를 추가로 수행하였다. $n=6, 8$ 은 표 1의 eval(200K 토큰) 결과가 충분히 우수하지 않아 별도 평가를 수행하지 않고 선형 보간을 이용하였다.</p>
 
-<figure>
-  <img src="assets/nloop_eval_loss.png" alt="검증 손실 곡선">
-  <figcaption>그림 2. 반복 횟수별 검증 손실 곡선.</figcaption>
-</figure>
-
-<figure>
-  <img src="assets/nloop_train_loss.png" alt="학습 손실 곡선">
-  <figcaption>그림 3. 반복 횟수별 학습 손실 곡선.</figcaption>
-</figure>
-
-<h3>2. 2D-AMoE 효율성 분석</h3>
-
-<h4>① FLOPs (하드웨어·dtype·compile 무관)</h4>
 <table>
+  <caption>표 2. n-Loop MoE 정확도 평가 (검증셋 20M 토큰) <span class="src">[출처: nLoopMoE / run eval-quality-n1·n2·n4]</span></caption>
   <thead>
-    <tr><th>구분</th><th>2D-AMoE</th></tr>
+    <tr><th>반복 $n$</th><th>task_CE</th><th>perplexity</th><th>avg LBL</th><th>eval_loss (task_CE + 0.005·LBL)</th></tr>
   </thead>
   <tbody>
-    <tr><td>total</td><td>80.02 TFLOP (100k 토큰)</td></tr>
-    <tr><td>per token</td><td>0.800 GFLOP/token (800.2 MFLOP)</td></tr>
-    <tr><td>avg ponder</td><td>2.134 step/token (max 8)</td></tr>
-  </tbody>
-</table>
-<p class="note">2D-AMoE op 분해: mm 85.0% · addmm 11.5% · sdpa(attention) 3.5% → 거의 expert/head matmul이 지배. 적응 halting으로 토큰당 평균 2.13/8 스텝만 사고(조기 종료 작동).</p>
-
-<h4>② Wall-clock (H100, batch=1)</h4>
-<table>
-  <thead>
-    <tr><th>조건</th><th>total</th><th>throughput</th><th>ms/token</th><th>achieved</th></tr>
-  </thead>
-  <tbody>
-    <tr><td>fp32 eager</td><td>10.82 s</td><td>9,244 tok/s</td><td>0.1082</td><td>7.40 TFLOP/s</td></tr>
-    <tr><td>bf16 + compile</td><td>15.18 s</td><td>6,588 tok/s</td><td>0.1518</td><td>5.27 TFLOP/s</td></tr>
-  </tbody>
-</table>
-<p class="note">→ bf16+compile = 0.71x (오히려 느림!)</p>
-
-<h4>③ Compile 시간 (cold cache)</h4>
-<table>
-  <thead>
-    <tr><th>구분</th><th>시간</th></tr>
-  </thead>
-  <tbody>
-    <tr><td>warmup 1st pass</td><td>28.39 s</td></tr>
-    <tr><td>추정 compile 오버헤드</td><td>~13.21 s</td></tr>
+    <tr><td>1</td><td>3.3414</td><td>28.26</td><td>12.86</td><td>3.4057</td></tr>
+    <tr><td>2</td><td>3.2671</td><td>26.24</td><td>24.14</td><td><strong>3.3878</strong></td></tr>
+    <tr><td>4</td><td><strong>3.2182</strong></td><td><strong>24.98</strong></td><td>48.22</td><td>3.4593</td></tr>
   </tbody>
 </table>
 
-<h2>Ⅴ. 고찰</h2>
-<p class="placeholder">[결과에 대한 해석, 제안 모델(2D-AMOE)과의 비교 분석, 예상과의 차이, 오차 원인 분석 등을 작성하세요.]</p>
+<table>
+  <caption>표 3. n-Loop MoE FLOPs (검증셋 20M 토큰) <span class="src">[출처: nLoopMoE / run eval-compute-n1·n2·n4]</span></caption>
+  <thead>
+    <tr><th>반복 $n$</th><th>FLOPs / token</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>275.4 MFLOP</td></tr>
+    <tr><td>2</td><td>388.8 MFLOP</td></tr>
+    <tr><td>4</td><td>615.4 MFLOP</td></tr>
+    <tr><td>6</td><td>842.0 MFLOP<sup>†</sup></td></tr>
+    <tr><td>8</td><td>1,068.7 MFLOP<sup>†</sup></td></tr>
+  </tbody>
+</table>
+<p class="note">$n=1, 2, 4$ 는 실측값이다. FLOPs/token이 $n$ 에 대해 완벽한 선형 관계 $\text{FLOPs/token} \approx 162.1 + 113.3\,n$ (MFLOP)를 보이므로, $n=6, 8$ <sup>†</sup>은 이를 이용해 보간하였다 ($n=6$: $162.1 + 6{\times}113.3 = 842.0$, $n=8$: $162.1 + 8{\times}113.3 = 1{,}068.7$).</p>
 
-<h2>Ⅵ. 결론</h2>
-<p class="placeholder">[연구의 최종적인 결론과 본 연구가 향후 LLM 효율성 개선에 미칠 영향 및 한계점 등을 요약하여 작성하세요.]</p>
+<h3 id="res-amoe-main">2. 2D-AMoE main 모델 평가</h3>
+<p>최종 2D-AMoE main 모델(332.26M, 최대 반복 8회, $\alpha=0.005$)을 학습 후, 정확도용 평가와 효율용 평가를 별도로 수행하였다.</p>
 
-<h2>참고문헌</h2>
+<table>
+  <caption>표 4. 2D-AMoE 20M 토큰 Eval 최종 성능 <span class="src">[출처: AMOE-SWEEP123 / run eval-quality]</span></caption>
+  <thead>
+    <tr><th>지표</th><th>값</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>eval_loss (task_CE + 0.005·LBL)</td><td>3.8343</td></tr>
+    <tr><td>task_CE</td><td>3.3940</td></tr>
+    <tr><td>avg LBL</td><td>88.0684</td></tr>
+    <tr><td>perplexity</td><td>29.78</td></tr>
+    <tr><td>eval tokens</td><td>19,973,447</td></tr>
+  </tbody>
+</table>
+
+<table>
+  <caption>표 5. 2D-AMoE FLOPs (검증셋 20M 토큰) <span class="src">[출처: AMOE-SWEEP123 / run eval-compute]</span></caption>
+  <thead>
+    <tr><th>지표</th><th>값</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>total FLOPs</td><td style="color:#d62728;font-weight:600">1.601×10¹⁶ (20M 토큰)</td></tr>
+    <tr><td>FLOPs / token</td><td style="color:#d62728;font-weight:600">8.005×10⁸ (800.5 MFLOP)</td></tr>
+    <tr><td>avg ponder step</td><td>2.122 step/token (max 8)</td></tr>
+    <tr><td>ponder_max step</td><td>5.6<sup>†</sup></td></tr>
+  </tbody>
+</table>
+<p class="note">FLOPs는 PyTorch flop_counter로 측정하였으며, 행렬곱(matmul)만 MAC×2로 계산하고 sort·scatter·elementwise 연산은 포함하지 않으므로 실제 연산량은 이보다 다소 많다. 적응적 halting에 의해 토큰당 평균 2.12/8 스텝만 연산되어, 조기 종료가 정상 작동함을 확인하였다. 여기서 avg ponder step은 각 스텝의 종료(halt) 확률을 가중치로 한 기대값 $\left(\sum_{k} k\,p_k\right)$ 이다. 예컨대 halt 확률이 $(0.5, 0.3, 0.2)$ 이면 $1{\times}0.5 + 2{\times}0.3 + 3{\times}0.2 = 1.7$ 로 계산된다. 반면 ponder_max step은 가중 평균이 아니라 실제 연산된 최대 스텝 수로, n-Loop의 선형 FLOPs 관계를 역산하여 구하였다: $(800.5 - 162.1)/113.3 \approx 5.6$ (보간값 <sup>†</sup>).</p>
+
+<h2 id="discussion">Ⅴ. 고찰</h2>
+<p>2D-AMoE의 최종 task_CE는 3.394로, n-Loop MoE 중 task_CE가 가장 낮은(최고 성능) $n=4$ 의 3.218보다 약 0.18 높다. 이 수치만 놓고 보면 2D-AMoE가 더 나은 아키텍처가 아니라고 판단할 수 있다.</p>
+<p>그러나 다음 두 가지를 고려해야 한다. 첫째, 2D-AMoE의 적응적 halting은 별도의 깊이 지정 없이 평균 2.12 step(최대 8)으로 수렴하여, 모델이 스스로 연산 깊이를 조절함을 보였다. 둘째, 실험 예산의 한계로 하이퍼파라미터 sweep의 횟수가 충분하지 않아 최적 파라미터를 확보하지 못하였고, 그 결과 학습 초기에 expert collapse가 발생하였다(표 4의 avg LBL 88.07은 심한 부하 불균형을 나타낸다). 이러한 불리한 조건에도 불구하고 최종 task_CE가 최고 성능 대조군인 $n=4$ 와 약 0.18 차이에 그친 점은, 충분한 탐색과 안정화를 통해 2D-AMoE가 대조군을 상회할 여지가 있음을 시사한다.</p>
+<p>한편 효율 측면에서, 2D-AMoE의 가중 평균 halting 깊이는 2.12 step이었으나 실제 연산된 FLOPs는 약 5.6 step에 해당하였다(표 5). 즉 토큰의 출력이 사실상 결정되는 기대 깊이(2.12 step)보다 훨씬 깊은 약 5.6 step에 이르러서야 연산이 종료된 것이다. 이는 추론 시 조기 종료의 임계값인 엡실론($\epsilon$)을 조정하여 성능과 연산 시간 사이의 trade-off를 제어함으로써 개선할 수 있을 것으로 보인다.</p>
+
+<h2 id="conclusion">Ⅵ. 결론</h2>
+<p>본 연구는 MoE의 수평적 확장과 적응적 수직 깊이 조절을 단일 아키텍처로 결합한 2D-AMoE를 제안하고, 동일 규모(332M)의 단순 수직 반복 대조군(n-Loop MoE)과 비교하였다. 현재 결과에서 2D-AMoE는 task_CE 기준 최고 성능 대조군($n=4$)에 약 0.18 못 미쳤으나, 적응적 halting이 별도의 지정 없이 연산 깊이를 자율적으로 조절하고, expert collapse라는 불리한 조건에서도 손실 격차가 작았다는 점에서 개선 잠재력을 확인하였다.</p>
+<p>본 연구의 한계는 다음과 같다. 첫째, 데이터셋(토큰)의 난이도에 따라 ponder step이 어떻게 달라지는지 분석하지 못하였다. 이는 "복잡한 토큰에 더 깊은 연산을 할당한다"는 적응적 깊이 조절의 핵심 가설을 직접 검증하지 못한 한계이다. 둘째, 학습 규모(토큰 수 및 step)가 충분하지 않아 모델이 완전히 수렴하지 못했을 가능성이 있다. 셋째, 하이퍼파라미터 sweep의 횟수가 충분하지 않아 최적 설정을 확보하지 못하였고, 이것이 학습 초기 expert collapse의 원인으로 작용하였다.</p>
+<p>향후 연구에서는 더 큰 학습 예산과 폭넓은 sweep, 그리고 토큰 난이도와 연산 깊이(ponder step) 간 상관 분석을 통해 2D-AMoE의 효율성을 정량적으로 규명할 필요가 있다.</p>
+<p>끝으로, 본 논문에 제시된 정량 결과는 제한된 실험 예산 하에서 얻어진 잠정치임을 밝힌다. 향후 충분한 학습 규모와 하이퍼파라미터 탐색을 확보한 추가 실험을 통해 이를 보완하고, 2D-AMoE의 효율성을 보다 엄밀히 검증할 것을 제언한다.</p>
+
+<h2 id="references">참고문헌</h2>
 <div class="references">
 <p>[1] Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., ... & Polosukhin, I. (2017). Attention is all you need. Advances in Neural Information Processing Systems, 30.</p>
 <p>[2] Shazeer, N., Mirhoseini, A., Maziarz, K., Davis, A., Le, Q., Hinton, G., & Dean, J. (2017). Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. arXiv preprint arXiv:1701.06538.</p>
@@ -246,7 +314,101 @@
 <p>[5] Fedus, W., Zoph, B., & Shazeer, N. (2022). Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity. The Journal of Machine Learning Research, 23(1), 5232-5270.</p>
 <p>[6] Penedo, G., et al. (2024). The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale. arXiv preprint arXiv:2406.17557.</p>
 <p>[7] Liu, J., et al. (2025). Moonlight: A compute-optimal MoE scaling law and model. arXiv preprint (under review).</p>
+<p>[8] VersatileFFN. (서지정보 추후 보완)</p>
+<p>[9] Chain-of-Experts (CoE). (서지정보 추후 보완)</p>
 </div>
+
+<h2 id="appendix-a">부록 A. 학습 손실 곡선</h2>
+<p>n-Loop MoE(대조군, 그림 A1–A3)와 2D-AMoE main 모델(그림 A4)의 학습 과정 손실 곡선이다.</p>
+
+<figure>
+  <img src="assets/nloop_final_vs_n.png" alt="반복 횟수에 따른 최종 손실">
+  <figcaption>그림 A1. 수직 반복 횟수 $n$ 에 따른 최종 eval/loss 및 perplexity. $n=2$ 에서 최저 후 단조 증가. <span class="src">[출처: nLoopMoE / run full-n1…full-n8]</span></figcaption>
+</figure>
+
+<figure>
+  <img src="assets/nloop_eval_loss.png" alt="검증 손실 곡선">
+  <figcaption>그림 A2. 반복 횟수별 검증 손실 곡선. <span class="src">[출처: nLoopMoE / run full-n1…full-n8]</span></figcaption>
+</figure>
+
+<figure>
+  <img src="assets/nloop_train_loss.png" alt="학습 손실 곡선">
+  <figcaption>그림 A3. 반복 횟수별 학습 손실 곡선. <span class="src">[출처: nLoopMoE / run full-n1…full-n8]</span></figcaption>
+</figure>
+
+<figure>
+  <img src="assets/amoe_main_train_loss.png" alt="2D-AMoE main 학습 손실 곡선">
+  <figcaption>그림 A4. 2D-AMoE main 모델의 학습·검증 손실 곡선. <span class="src">[출처: AMOE-SWEEP123 / run main]</span></figcaption>
+</figure>
+
+<h2 id="appendix-b">부록 B. n-Loop MoE 하이퍼파라미터 탐색 (Sweep)</h2>
+<p>각 반복 횟수 $n$ 의 최적 설정을 찾기 위해, $n$ 은 모델 아키텍처를 결정하므로 이를 1차 기준으로 그룹화하여 Bayesian sweep을 수행하였다. 탐색 변수는 $\mathrm{lr}$, $\mathrm{muon\_lr}$, $\alpha$, 그리고 $n \in \{1,2,4,6,8\}$ 이며, 단축 예산 1,357 step으로 학습하였다. 125개 run(n별 23~28개)을 분석하였다.</p>
+
+<p>모든 $n$ 에서 $\alpha=0.005$ 가 최적이었고(그림 B2), $n$ 의 최적 손실은 $n$ 이 커질수록 단조 증가하였다(그림 B1). 이는 단순 residual 반복의 깊이 확장이 단축 예산에서 오히려 학습을 어렵게 함을 보이며, 각 $n$ 의 최적 설정은 부록 A의 full-budget run(full-n$k$)에 그대로 사용되었다.</p>
+
+<figure>
+  <img src="assets/nloop_sweep_best_by_n.png" alt="n별 최적 검증 손실">
+  <figcaption>그림 B1. 반복 횟수 $n$ 별 sweep 최적(최저) 검증 손실. <span class="src">[출처: nLoopMoE (sweep)]</span></figcaption>
+</figure>
+
+<figure>
+  <img src="assets/nloop_sweep_all_by_n.png" alt="n별 전체 sweep run">
+  <figcaption>그림 B2. 전체 sweep run의 검증 손실($n$ 별 그룹, $\alpha$ 색상). 모든 $n$ 에서 $\alpha=0.005$(녹색)가 최저. <span class="src">[출처: nLoopMoE (sweep)]</span></figcaption>
+</figure>
+
+<table>
+  <caption>표 B1. n-Loop MoE sweep의 $n$ 별 최적 run (eval/loss 최저, 1,357 step, eval은 검증셋 20M 토큰으로 수행) <span class="src">[출처: nLoopMoE (sweep)]</span></caption>
+  <thead>
+    <tr><th>반복 $n$</th><th>최적 run</th><th>$\alpha$</th><th>lr</th><th>muon_lr</th><th>eval/loss</th><th>perplexity</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>electric-sweep-26</td><td>0.005</td><td>0.003168</td><td>0.02605</td><td>4.0086</td><td>55.1</td></tr>
+    <tr><td>2</td><td>mild-sweep-97</td><td>0.005</td><td>0.001475</td><td>0.01611</td><td>4.1210</td><td>61.6</td></tr>
+    <tr><td>4</td><td>eternal-sweep-58</td><td>0.005</td><td>0.001598</td><td>0.008679</td><td>4.2987</td><td>73.6</td></tr>
+    <tr><td>6</td><td>quiet-sweep-52</td><td>0.005</td><td>0.002532</td><td>0.01228</td><td>4.3510</td><td>77.6</td></tr>
+    <tr><td>8</td><td>resilient-sweep-99</td><td>0.005</td><td>0.00118</td><td>0.008135</td><td>4.5707</td><td>96.6</td></tr>
+  </tbody>
+</table>
+
+<h2 id="appendix-c">부록 C. 2D-AMoE 하이퍼파라미터 탐색 (Sweep)</h2>
+<p>2D-AMoE의 주요 하이퍼파라미터를 Bayesian sweep으로 탐색하였다. 탐색 변수는 학습률 $\mathrm{lr}$, Muon 학습률 $\mathrm{muon\_lr}$, 종료 확률 사전분포 계수 $\mathrm{ponder\_beta}$, load-balancing 손실 가중치 $\alpha$ 이며, 그 외 최대 반복 8회, $\text{experts}=4$, $\text{block\_size}=768$ 은 고정하였다. 각 run은 탐색 효율을 위해 1,357 step의 단축 예산으로 학습하였으므로, 이 절의 손실값은 full-budget 결과(부록 A, 54k step)와 직접 비교할 수 없다. 16개 run을 분석 대상으로 한다.</p>
+
+<p>탐색 결과, 검증 손실을 지배하는 변수는 $\alpha$ 였다. $\alpha=0.005$ 에서 최저 손실(4.50)을 보였고, $\alpha$ 가 커질수록 손실이 단조적으로 악화되어 $\alpha=0.05$ 에서는 8.5~9.4 수준으로 발산에 가까운 학습 실패를 보였다(그림 C1). 반면 $\mathrm{lr}$·$\mathrm{ponder\_beta}$ 는 동일 $\alpha$ 내에서 손실에 상대적으로 작은 영향만을 미쳤다(그림 C2). 최적 설정은 $\alpha=0.005$, $\mathrm{lr}=1.84\times10^{-3}$, $\mathrm{muon\_lr}=3.23\times10^{-2}$, $\mathrm{ponder\_beta}=1.33\times10^{-2}$ (laced-sweep-9, eval/loss 4.50) 였다.</p>
+
+<figure>
+  <img src="assets/sweep_loss_by_alpha.png" alt="alpha에 따른 검증 손실">
+  <figcaption>그림 C1. load-balancing 가중치 $\alpha$ 에 따른 검증 손실. $\alpha$ 가 지배적 요인이며 작을수록 우수. 별표는 최적 run. <span class="src">[출처: AMOE-SWEEP123 (sweep)]</span></figcaption>
+</figure>
+
+<figure>
+  <img src="assets/sweep_loss_vs_lr.png" alt="학습률 / 검증 손실">
+  <figcaption>그림 C2. 학습률 $\mathrm{lr}$ 과 검증 손실의 관계($\alpha$ 별 색상). 동일 $\alpha$ 내에서 $\mathrm{lr}$ 의 영향은 상대적으로 작다. <span class="src">[출처: AMOE-SWEEP123 (sweep)]</span></figcaption>
+</figure>
+
+<table>
+  <caption>표 C1. sweep run 16개 (검증 손실 오름차순, 1,357 step, eval은 검증셋 20M 토큰으로 수행) <span class="src">[출처: AMOE-SWEEP123 (sweep)]</span></caption>
+  <thead>
+    <tr><th>순위</th><th>run</th><th>$\alpha$</th><th>lr</th><th>muon_lr</th><th>ponder_beta</th><th>eval/loss</th><th>perplexity</th></tr>
+  </thead>
+  <tbody>
+    <tr class="best"><td>1</td><td>laced-sweep-9</td><td>0.005</td><td>0.001841</td><td>0.03227</td><td>0.01335</td><td>4.5034</td><td>90.3</td></tr>
+    <tr><td>2</td><td>lucky-sweep-8</td><td>0.005</td><td>0.001264</td><td>0.01022</td><td>0.001737</td><td>4.5534</td><td>95.0</td></tr>
+    <tr><td>3</td><td>volcanic-sweep-16</td><td>0.01</td><td>0.0005356</td><td>0.005831</td><td>0.001279</td><td>5.2434</td><td>189.3</td></tr>
+    <tr><td>4</td><td>good-sweep-11</td><td>0.01</td><td>0.001068</td><td>0.006329</td><td>0.07271</td><td>5.2618</td><td>192.8</td></tr>
+    <tr><td>5</td><td>fearless-sweep-18</td><td>0.01</td><td>0.0001939</td><td>0.008888</td><td>0.002723</td><td>5.3653</td><td>213.9</td></tr>
+    <tr><td>6</td><td>smooth-sweep-10</td><td>0.02</td><td>0.001245</td><td>0.01075</td><td>0.009334</td><td>5.9364</td><td>378.6</td></tr>
+    <tr><td>7</td><td>still-sweep-19</td><td>0.02</td><td>0.0006907</td><td>0.007802</td><td>0.004294</td><td>6.0834</td><td>438.5</td></tr>
+    <tr><td>8</td><td>hearty-sweep-15</td><td>0.02</td><td>0.001237</td><td>0.009319</td><td>0.06144</td><td>6.0973</td><td>444.6</td></tr>
+    <tr><td>9</td><td>charmed-sweep-12</td><td>0.05</td><td>0.003773</td><td>0.01775</td><td>0.001982</td><td>8.5002</td><td>4915.7</td></tr>
+    <tr><td>10</td><td>distinctive-sweep-7</td><td>0.05</td><td>0.00234</td><td>0.01216</td><td>0.001338</td><td>8.5700</td><td>5271.4</td></tr>
+    <tr><td>11</td><td>frosty-sweep-5</td><td>0.05</td><td>0.0003549</td><td>0.02037</td><td>0.004475</td><td>8.7250</td><td>6154.6</td></tr>
+    <tr><td>12</td><td>faithful-sweep-14</td><td>0.05</td><td>0.0009456</td><td>0.01106</td><td>0.01655</td><td>8.9017</td><td>7344.3</td></tr>
+    <tr><td>13</td><td>drawn-sweep-6</td><td>0.05</td><td>0.004276</td><td>0.04329</td><td>0.07994</td><td>9.0055</td><td>8147.5</td></tr>
+    <tr><td>14</td><td>firm-sweep-13</td><td>0.05</td><td>0.003352</td><td>0.006806</td><td>0.08167</td><td>9.0161</td><td>8234.4</td></tr>
+    <tr><td>15</td><td>vital-sweep-20</td><td>0.05</td><td>0.0002564</td><td>0.008549</td><td>0.02796</td><td>9.0533</td><td>8547.1</td></tr>
+    <tr><td>16</td><td>faithful-sweep-17</td><td>0.05</td><td>0.0001482</td><td>0.009569</td><td>0.05143</td><td>9.4269</td><td>12417.4</td></tr>
+  </tbody>
+</table>
 
 </body>
 </html>
